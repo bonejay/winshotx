@@ -154,7 +154,7 @@ fn exporta_un_mp4_que_media_foundation_acepta() {
             height,
             fps: 30,
             quality: 70,
-        },
+        bitrate_override: None },
         None,
         |_stage, _done, _total| {},
     )
@@ -369,7 +369,7 @@ fn de_la_pantalla_al_gif_y_al_mp4() {
             height: region.height,
             fps: 20,
             quality: 70,
-        },
+        bitrate_override: None },
         None,
         |_, _, _| {},
     )
@@ -420,7 +420,7 @@ fn el_mp4_exportado_lleva_el_sonido_dentro() {
             height: alto,
             fps: 30,
             quality: 70,
-        },
+        bitrate_override: None },
         Some(pista),
         |_, _, _| {},
     )

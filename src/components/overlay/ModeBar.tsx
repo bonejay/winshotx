@@ -65,8 +65,8 @@ export function ModeBar({
         <Boton
           activo={value === "still"}
           onClick={() => onChange("still")}
-          etiqueta="Foto"
-          titulo="Foto del recorte · F"
+          etiqueta="Photo"
+          titulo="Photo of the crop · F"
         >
           <Camera className="size-[19px]" />
         </Boton>
@@ -74,19 +74,10 @@ export function ModeBar({
         <Boton
           activo={value === "video"}
           onClick={() => onChange("video")}
-          etiqueta="Vídeo"
-          titulo="Grabar el recorte en MP4 · V"
+          etiqueta="Video"
+          titulo="Record the crop to MP4 · V"
         >
           <Video className="size-[19px]" />
-        </Boton>
-
-        <Boton
-          activo={value === "gif"}
-          onClick={() => onChange("gif")}
-          etiqueta="GIF"
-          titulo="Grabar el recorte en GIF · G"
-        >
-          <IconoGif />
         </Boton>
 
         <span className="mx-1 h-6 w-px bg-white/10" />
@@ -96,8 +87,8 @@ export function ModeBar({
         <Boton
           activo={pantallaEntera}
           onClick={() => onPantallaEntera(!pantallaEntera)}
-          etiqueta="Pantalla entera"
-          titulo="Pantalla entera, de un clic · P"
+          etiqueta="Whole screen"
+          titulo="Whole screen, one click · P"
         >
           <Monitor className="size-[19px]" />
         </Boton>
@@ -114,8 +105,8 @@ export function ModeBar({
           <Boton
             activo={conBarra}
             onClick={() => onConBarra(!conBarra)}
-            etiqueta="Elegir qué hacer"
-            titulo="Al soltar, elegir qué hacer con el recorte · B"
+            etiqueta="Choose what to do"
+            titulo="On release, choose what to do with the crop · B"
           >
             <PanelBottom className="size-[19px]" />
           </Boton>
@@ -127,8 +118,8 @@ export function ModeBar({
         <button
           type="button"
           onClick={onAjustes}
-          title={t("Ajustes de winshotx")}
-          aria-label={t("Ajustes")}
+          title={t("winshotx settings")}
+          aria-label={t("Settings")}
           className="flex size-9 items-center justify-center rounded-xl text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
         >
           <Settings className="size-[19px]" />
@@ -139,8 +130,8 @@ export function ModeBar({
         <button
           type="button"
           onClick={onCancel}
-          title={t("Salir sin capturar · Esc")}
-          aria-label={t("Salir sin capturar")}
+          title={t("Leave without capturing · Esc")}
+          aria-label={t("Leave without capturing")}
           className="flex size-9 items-center justify-center rounded-xl text-neutral-400 transition-colors hover:bg-red-500/20 hover:text-red-300"
         >
           <X className="size-[19px]" />
@@ -157,29 +148,6 @@ export function ModeBar({
  * decían. Las letras van como trazos, no como texto, para que engorden con el mismo
  * `stroke-width` que la cámara y no salgan finas a su lado.
  */
-function IconoGif() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="size-[19px]"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="1.6" y="4.4" width="20.8" height="15.2" rx="3.4" />
-      {/* Las tres letras, un pelín más finas que la caja: al mismo grosor se empastan a
-          los 19 px a los que se ve esto de verdad. */}
-      <g strokeWidth="1.7">
-        <path d="M9.5 10.2a2.5 2.5 0 0 0-4.4 1.8 2.5 2.5 0 0 0 4.5 1.6v-1.4H8.2" />
-        <path d="M12.7 9.7v4.6" />
-        <path d="M19 9.7h-3.1v4.6M15.9 12h2.5" />
-      </g>
-    </svg>
-  );
-}
 
 function Boton({
   activo,

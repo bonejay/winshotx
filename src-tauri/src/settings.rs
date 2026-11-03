@@ -19,20 +19,15 @@ pub enum CaptureFlow {
     Instant,
 }
 
-
 /// En que idioma habla la aplicacion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[derive(Default)]
 pub enum Language {
-    /// El de Windows, si winshotx lo habla; si no, ingles. Es el de fabrica.
     #[default]
-    Sistema,
-    Es,
+    #[serde(alias = "sistema", alias = "es", alias = "zh")]
     En,
-    Zh,
 }
-
 
 /// De que color se pinta la aplicacion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,10 +43,42 @@ pub enum Theme {
     Oscuro,
 }
 
+/// Capture preview quality and final video encoding preferences.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EncodingSettings {
+    pub engine: String,
+    pub encoder: String,
+    pub quality: u8,
+    pub bitrate_mbps: f64,
+    pub preset: String,
+    pub gpu: String,
+    pub extra_args: String,
+}
+impl Default for EncodingSettings {
+    fn default() -> Self {
+        Self {
+            engine: "native".into(),
+            encoder: "libx264".into(),
+            quality: 85,
+            bitrate_mbps: 0.0,
+            preset: "medium".into(),
+            gpu: String::new(),
+            extra_args: "[]".into(),
+        }
+    }
+}
+impl EncodingSettings {
+    pub fn bitrate(&self) -> Option<u32> {
+        (self.bitrate_mbps.is_finite() && self.bitrate_mbps > 0.0)
+            .then(|| (self.bitrate_mbps.clamp(0.1, 200.0) * 1_000_000.0) as u32)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    pub encoding: EncodingSettings,
     pub capture_shortcut: String,
     pub record_shortcut: String,
     /// La tecla que se queda con lo que ACABA de pasar. Va aparte del atajo de grabar
@@ -93,6 +120,7 @@ pub struct Settings {
     /// Cuesta disco y maquina todo el rato, asi que viene apagado y se enciende a mano:
     /// es la unica funcion de winshotx que trabaja cuando nadie se lo ha pedido.
     #[serde(default)]
+    #[serde(skip_deserializing)]
     pub replay_enabled: bool,
     /// Cuantos segundos guarda el anillo hacia atras.
     #[serde(default = "segundos_de_repeticion")]
@@ -152,6 +180,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            encoding: EncodingSettings::default(),
             capture_shortcut: "CmdOrCtrl+Shift+2".into(),
             record_shortcut: "CmdOrCtrl+Shift+5".into(),
             replay_shortcut: atajo_de_repeticion(),
@@ -159,7 +188,7 @@ impl Default for Settings {
             save_directory: default_save_dir(),
             capture_flow: CaptureFlow::Toolbar,
             theme: Theme::Sistema,
-            language: Language::Sistema,
+            language: Language::En,
             copy_after_capture: true,
             open_editor_after_recording: true,
             capture_cursor: true,
@@ -198,7 +227,7 @@ fn segundos_de_repeticion() -> u32 {
 /// Quince se ven perfectamente para entender que acaba de pasar, y son la mitad de disco y
 /// la mitad de maquina que treinta. El porque, con su medicion, esta en `FPS_ANILLO`.
 fn fps_de_repeticion() -> u32 {
-    crate::record::buffer::FPS_ANILLO
+    15
 }
 
 /// Sigue la serie de las otras dos: capturar es la 2, grabar la 5.
@@ -266,6 +295,9 @@ pub fn load(app: &AppHandle) -> Settings {
     if !decidido {
         settings.onboarded = true;
     }
+    settings.language = Language::En;
+    settings.replay_enabled = false;
+    settings.onboarded = true;
     settings
 }
 
@@ -299,7 +331,10 @@ mod tests {
         });
         let settings: Settings = serde_json::from_value(viejos).expect("leer los ajustes");
         assert_eq!(settings.edit_shortcut, "Super+Shift+KeyL");
-        assert_eq!(settings.capture_shortcut, "Alt+KeyX", "y sin pisar lo que habia");
+        assert_eq!(
+            settings.capture_shortcut, "Alt+KeyX",
+            "y sin pisar lo que habia"
+        );
     }
 
     /// Un `settings.json` escrito por una version anterior no trae las claves nuevas. Sin
@@ -317,8 +352,14 @@ mod tests {
         assert_eq!(settings.capture_shortcut, "Alt+KeyX");
         assert_eq!(settings.save_directory, "D:\\capturas");
         assert!(!settings.show_magnifier);
-        assert_eq!(settings.capture_delay_seconds, 0, "el temporizador nace apagado");
-        assert!(!settings.hide_desktop_icons, "los iconos no se tocan sin pedirlo");
+        assert_eq!(
+            settings.capture_delay_seconds, 0,
+            "el temporizador nace apagado"
+        );
+        assert!(
+            !settings.hide_desktop_icons,
+            "los iconos no se tocan sin pedirlo"
+        );
     }
 
     /// Las tres opciones que ofrece la interfaz tienen que caber en el tipo del campo.
@@ -358,5 +399,33 @@ mod tests {
             !viene_de_actualizar(None, "0.1.12", false),
             "recien instalada ya se abre la bienvenida: no hay nada que actualizar"
         );
+    }
+}
+
+#[cfg(test)]
+mod english_edition_tests {
+    use super::*;
+    #[test]
+    fn legacy_languages_and_replay_cannot_reenable_background_recording() {
+        for language in ["es", "zh", "sistema", "en"] {
+            let raw = serde_json::json!({ "language": language, "replayEnabled": true });
+            let settings: Settings = serde_json::from_value(raw).unwrap();
+            assert!(matches!(settings.language, Language::En));
+            assert!(!settings.replay_enabled);
+        }
+    }
+    #[test]
+    fn encoding_preferences_round_trip() {
+        let mut settings = Settings::default();
+        settings.encoding.encoder = "hevc_nvenc".into();
+        settings.encoding.bitrate_mbps = 12.5;
+        settings.encoding.gpu = "1".into();
+        settings.encoding.extra_args = r#"["-g", "120"]"#.into();
+        let roundtrip: Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(roundtrip.encoding.encoder, "hevc_nvenc");
+        assert_eq!(roundtrip.encoding.bitrate(), Some(12_500_000));
+        assert_eq!(roundtrip.encoding.gpu, "1");
+        assert_eq!(roundtrip.encoding.extra_args, r#"["-g", "120"]"#);
     }
 }

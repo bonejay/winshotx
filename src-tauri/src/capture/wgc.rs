@@ -116,7 +116,7 @@ fn tarjeta() -> Result<Tarjeta> {
         return Ok(tarjeta.clone());
     }
     let (dispositivo, contexto) =
-        create_d3d_device().map_err(|e| AppError::Msg(format!("sin tarjeta gráfica: {e}")))?;
+        create_d3d_device().map_err(|e| AppError::Msg(format!("No graphics device: {e}")))?;
     let tarjeta = Tarjeta {
         dispositivo,
         contexto,
@@ -188,7 +188,7 @@ fn fotografiar_con(
     let tamanno = item.Size().map_err(de_windows)?;
     if (tamanno.Width as u32, tamanno.Height as u32) != (monitor.width, monitor.height) {
         return Err(AppError::Msg(format!(
-            "Windows dice que mide {}x{} y la pantalla mide {}x{}",
+            "Windows reported {}x{} but the display is {}x{}",
             tamanno.Width, tamanno.Height, monitor.width, monitor.height
         )));
     }
@@ -233,7 +233,7 @@ fn fotografiar_con(
         sesion.StartCapture().map_err(de_windows)?;
         let mut fotograma = llegada
             .recv_timeout(ESPERA)
-            .map_err(|_| AppError::Msg("no ha llegado ningún fotograma".into()))?;
+            .map_err(|_| AppError::Msg("No capture frame was received".into()))?;
         if momento == Momento::ElMasFresco {
             // Si en lo que dura un fotograma de pantalla llega otro, ese es mas nuevo. Y si
             // no llega, que es lo normal con la pantalla quieta, vale el primero: esperar
@@ -254,7 +254,7 @@ fn fotografiar_con(
 
     if foto.dimensions() != (monitor.width, monitor.height) {
         return Err(AppError::Msg(format!(
-            "ha salido de {}x{} y la pantalla mide {}x{}",
+            "The captured frame is {}x{} but the display is {}x{}",
             foto.width(),
             foto.height(),
             monitor.width,
@@ -296,7 +296,7 @@ fn copiar(tarjeta: &Tarjeta, fotograma: &Direct3D11CaptureFrame) -> Result<RgbaI
     unsafe { tarjeta.contexto.Unmap(legible.texture(), 0) };
 
     RgbaImage::from_raw(desc.Width, desc.Height, rgba)
-        .ok_or_else(|| AppError::Msg("el fotograma no cuadra".into()))
+        .ok_or_else(|| AppError::Msg("Capture frame dimensions do not match".into()))
 }
 
 /// Pone el proceso de las pruebas a ver las pantallas como la app. La app las ve por

@@ -47,12 +47,12 @@ const HERRAMIENTAS: {
   etiqueta: string;
   tecla: string;
 }[] = [
-  { id: "arrow", icono: ArrowUpRight, etiqueta: "Flecha", tecla: "1" },
-  { id: "box", icono: Square, etiqueta: "Rectángulo", tecla: "2" },
-  { id: "text", icono: Type, etiqueta: "Texto", tecla: "3" },
-  { id: "highlight", icono: Highlighter, etiqueta: "Resaltar", tecla: "4" },
+  { id: "arrow", icono: ArrowUpRight, etiqueta: "Arrow", tecla: "1" },
+  { id: "box", icono: Square, etiqueta: "Box", tecla: "2" },
+  { id: "text", icono: Type, etiqueta: "Text", tecla: "3" },
+  { id: "highlight", icono: Highlighter, etiqueta: "Highlight", tecla: "4" },
   // El paso numerado va con los que señalan: es la marca de «primero esto, luego esto».
-  { id: "step", icono: Circle, etiqueta: "Paso numerado", tecla: "5" },
+  { id: "step", icono: Circle, etiqueta: "Numbered step", tecla: "5" },
 ];
 
 export function BarraAnotar({
@@ -87,7 +87,7 @@ export function BarraAnotar({
       {/* Tapar datos va aparte: los otros cuatro señalan, este esconde. */}
       <Boton
         icono={Difuminar}
-        etiqueta={`${t("Mosaico")} · 6`}
+        etiqueta={`${t("Pixelate")} · 6`}
         activa={activa === "blur"}
         onClick={() => onElegir(activa === "blur" ? null : "blur")}
       />
@@ -119,7 +119,7 @@ export function BarraAnotar({
         <input
           value={texto}
           onChange={(e) => onTexto(e.target.value)}
-          placeholder={t("Escribe y pulsa en la imagen")}
+          placeholder={t("Type, then click on the image")}
           className="h-7 min-w-[190px] flex-1 rounded-md border border-white/10 bg-black/40 px-2 text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:border-blue-500/70 focus:outline-none"
         />
       )}
@@ -139,28 +139,28 @@ export function BarraAnotar({
         */}
         <Boton
           icono={TextSelect}
-          etiqueta={t("Copiar el texto de la imagen")}
+          etiqueta={t("Copy the text in the image")}
           activa={false}
           onClick={onCopiarTexto}
           apagada={buscandoDatos}
         />
         <Boton
           icono={ShieldCheck}
-          etiqueta={t("Tapar datos personales")}
+          etiqueta={t("Cover up personal data")}
           activa={false}
           onClick={onTaparDatos}
           apagada={buscandoDatos}
         />
         <Boton
           icono={Undo2}
-          etiqueta={t("Deshacer la última (Ctrl+Z)")}
+          etiqueta={t("Undo the last one (Ctrl+Z)")}
           activa={false}
           onClick={onDeshacer}
           apagada={cuantas === 0}
         />
         <Boton
           icono={X}
-          etiqueta={t("Quitar todas")}
+          etiqueta={t("Remove them all")}
           activa={false}
           onClick={onBorrarTodo}
           apagada={cuantas === 0}

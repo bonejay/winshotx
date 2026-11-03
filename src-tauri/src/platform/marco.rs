@@ -90,10 +90,10 @@ impl Marco {
         let hilo = std::thread::Builder::new()
             .name("winshotx-marco".into())
             .spawn(move || bucle(region, grosor.max(1), aviso_tx))
-            .map_err(|e| AppError::Msg(format!("no se ha podido abrir el marco: {e}")))?;
+            .map_err(|e| AppError::Msg(format!("Could not open the capture border: {e}")))?;
         let (id_hilo, ventanas) = aviso_rx
             .recv()
-            .map_err(|_| AppError::Msg("el hilo del marco no ha llegado a arrancar".into()))?
+            .map_err(|_| AppError::Msg("Could not start the capture border".into()))?
             .map_err(AppError::Msg)?;
         Ok(Self {
             hilo: Some(hilo),

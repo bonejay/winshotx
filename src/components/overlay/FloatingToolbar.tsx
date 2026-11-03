@@ -59,7 +59,7 @@ export function FloatingToolbar({
           <>
             <IconButton
               icon={Copy}
-              label={t("Copiar")}
+              label={t("Copy")}
               shortcut="Enter"
               showLabel
               accent
@@ -68,35 +68,35 @@ export function FloatingToolbar({
             />
             <IconButton
               icon={Download}
-              label={t("Guardar")}
+              label={t("Save")}
               shortcut="Ctrl+S"
               onClick={onSave}
               disabled={busy}
             />
             <IconButton
               icon={FolderOpen}
-              label={t("Guardar en…")}
-              shortcut={t("Ctrl+Mayús+S")}
+              label={t("Save to…")}
+              shortcut={t("Ctrl+Shift+S")}
               onClick={onSaveAs}
               disabled={busy}
             />
             <IconButton
               icon={Pencil}
-              label={t("Editar")}
+              label={t("Edit")}
               shortcut="E"
               onClick={onEdit}
               disabled={busy}
             />
             <IconButton
               icon={Pin}
-              label={t("Anclar")}
+              label={t("Pin")}
               shortcut="A"
               onClick={onPin}
               disabled={busy}
             />
             <IconButton
               icon={Type}
-              label={t("Copiar el texto")}
+              label={t("Copy the text")}
               shortcut="T"
               onClick={onText}
               disabled={busy}
@@ -113,15 +113,15 @@ export function FloatingToolbar({
             className="flex h-8 items-center gap-2 rounded-lg bg-red-500 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-red-400 disabled:opacity-50"
           >
             <Circle className="size-3 fill-current" />
-            {modo === "gif" ? t("Grabar GIF") : t("Grabar vídeo")}
+            {t("Record video")}
           </button>
         )}
         <span className="mx-0.5 h-5 w-px bg-white/10" />
-        <IconButton icon={X} label={t("Cancelar")} shortcut="Esc" onClick={onCancel} danger />
+        <IconButton icon={X} label={t("Cancel")} shortcut="Esc" onClick={onCancel} danger />
       </GlassPanel>
       {busy && (
         <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-neutral-900/90 px-2 py-1 text-[11px] text-neutral-300 shadow-lg">
-          <Check className="size-3 text-emerald-400" /> {t("Procesando…")}
+          <Check className="size-3 text-emerald-400" /> {t("Working…")}
         </div>
       )}
     </div>

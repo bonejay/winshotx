@@ -42,7 +42,7 @@ pub fn build_overlay_payload(state: &AppState, monitor_id: u32) -> Result<Overla
     let freeze = freezes
         .iter()
         .find(|f| f.monitor.id == monitor_id)
-        .ok_or_else(|| AppError::Msg(format!("el monitor {monitor_id} no tiene captura congelada")))?;
+        .ok_or_else(|| AppError::Msg(format!("Monitor {monitor_id} has no frozen capture")))?;
 
     Ok(OverlayPayload {
         monitor: freeze.monitor.clone(),
@@ -100,7 +100,7 @@ pub async fn freeze_png(
             .iter()
             .find(|f| f.monitor.id == monitor_id)
             .map(|f| f.png.clone())
-            .ok_or_else(|| AppError::Msg(format!("el monitor {monitor_id} no tiene captura congelada")))?
+            .ok_or_else(|| AppError::Msg(format!("Monitor {monitor_id} has no frozen capture")))?
     };
     Ok(tauri::ipc::Response::new((*png).clone()))
 }
@@ -128,7 +128,7 @@ pub async fn freeze_bytes(
             .iter()
             .find(|f| f.monitor.id == monitor_id)
             .map(|f| f.image.clone())
-            .ok_or_else(|| AppError::Msg(format!("el monitor {monitor_id} no tiene captura congelada")))?
+            .ok_or_else(|| AppError::Msg(format!("Monitor {monitor_id} has no frozen capture")))?
     };
     Ok(tauri::ipc::Response::new(capture::bmp_bytes(&image)))
 }
@@ -238,7 +238,7 @@ fn entregar(
             let texto = crate::platform::ocr::leer_texto(&bytes)?;
             if texto.is_empty() {
                 return Err(AppError::Msg(
-                    "No he encontrado texto en esa captura.".into(),
+                    "I found no text in that shot.".into(),
                 ));
             }
             crate::platform::clipboard::copy_text(&texto)?;
@@ -260,7 +260,7 @@ fn entregar(
             result.path = Some(path.to_string_lossy().to_string());
             return Ok(result);
         }
-        other => return Err(AppError::Msg(format!("acción desconocida: {other}"))),
+        other => return Err(AppError::Msg(format!("Unknown action: {other}"))),
     }
 
     windows_mgr::close_overlays(app);
@@ -289,7 +289,7 @@ fn ruta_de_anclada(app: &AppHandle, path: String) -> Result<PathBuf> {
     let path = PathBuf::from(path);
     let pins = app.state::<AppState>().temp_root.join("pins");
     if !dentro_de_las_ancladas(&path, &pins) {
-        return Err(AppError::Msg("esa imagen no es una captura anclada".into()));
+        return Err(AppError::Msg("This image is not a pinned capture".into()));
     }
     Ok(path)
 }
@@ -381,7 +381,7 @@ pub async fn pinned_text(app: AppHandle, path: String) -> Result<()> {
     let texto = crate::platform::ocr::leer_texto(&bytes)?;
     if texto.is_empty() {
         return Err(AppError::Msg(
-            "No he encontrado texto en esa captura.".into(),
+            "I found no text in that shot.".into(),
         ));
     }
     crate::platform::clipboard::copy_text(&texto)?;
@@ -397,7 +397,7 @@ pub async fn pinned_text(app: AppHandle, path: String) -> Result<()> {
 #[tauri::command]
 pub async fn copy_color(color: String) -> Result<()> {
     if !es_un_color(&color) {
-        return Err(AppError::Msg("eso no es un color".into()));
+        return Err(AppError::Msg("Invalid color".into()));
     }
     crate::platform::clipboard::copy_text(&color)?;
     Ok(())
@@ -455,6 +455,9 @@ pub async fn start_recording(
     region: Rect,
     options: RecordOptions,
 ) -> Result<SessionInfo> {
+    if options.format != "video" {
+        return Err(AppError::Msg("Only video recording is supported in this edition.".into()));
+    }
     recorder::start(&app, region, options)
 }
 
@@ -691,7 +694,7 @@ pub async fn copiar_texto(app: AppHandle, session_id: String, index: usize) -> R
     let bytes = png::to_bytes(&image)?;
     let texto = crate::platform::ocr::leer_texto(&bytes)?;
     if texto.trim().is_empty() {
-        return Err(AppError::Msg("No he encontrado texto en esta imagen.".into()));
+        return Err(AppError::Msg("No text was found in this image.".into()));
     }
     crate::platform::clipboard::copy_text(&texto)?;
     Ok(texto)
@@ -786,12 +789,12 @@ pub async fn clear_cache(app: AppHandle) -> Result<CacheStats> {
         .any(|label| label.starts_with(windows_mgr::EDITOR_LABEL))
     {
         return Err(AppError::Msg(
-            "cierra el editor antes de vaciar la caché".into(),
+            "Close the editor before clearing the cache".into(),
         ));
     }
     if state.is_recording() {
         return Err(AppError::Msg(
-            "hay una grabación en curso; párala antes de vaciar la caché".into(),
+            "Stop recording before clearing the cache".into(),
         ));
     }
     let _ = std::fs::remove_dir_all(&root);
@@ -822,16 +825,10 @@ pub async fn show_screen_number(app: AppHandle, screen: u32) -> Result<()> {
 
 /// Como va el anillo de los ultimos segundos: si corre, que pantalla vigila y cuanto lleva
 /// grabado. La interfaz lo pregunta al abrirse; despues se entera por el evento.
-#[tauri::command]
-pub async fn replay_status(app: AppHandle) -> Result<crate::replay::ReplayStatus> {
-    Ok(crate::replay::status(&app))
-}
+
 
 /// Quedarse con lo ultimo que paso. Es lo mismo que hace la tecla.
-#[tauri::command]
-pub async fn replay_save(app: AppHandle) -> Result<()> {
-    crate::replay::save(&app)
-}
+
 
 /// Lleva al usuario a la lista de aplicaciones de Windows, que es donde se quita la
 /// Herramienta de Recortes si quiere que Win+Mayus+S deje de abrirla.
@@ -863,7 +860,7 @@ pub async fn open_folder(path: String) -> Result<()> {
 pub async fn open_url(url: String) -> Result<()> {
     if !crate::enlaces::permitido(&url) {
         return Err(crate::error::AppError::Msg(format!(
-            "esa dirección no es de winshotx: {url}"
+            "This address is not allowed: {url}"
         )));
     }
     crate::platform::abrir_url(&url)
@@ -994,35 +991,15 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 }
 
 #[tauri::command]
-pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings> {
+pub async fn set_settings(app: AppHandle, mut settings: Settings) -> Result<Settings> {
+    settings.language = crate::settings::Language::En;
+    settings.replay_enabled = false;
+    settings.onboarded = true;
+    crate::encode::ffmpeg::validate(&settings.encoding)?;
     let state = app.state::<AppState>();
     let previous = state.settings.read().clone();
     *state.settings.write() = settings.clone();
     crate::settings::save(&app, &settings)?;
-
-    // El anillo de los ultimos segundos se reengancha aqui. Cambiar los segundos tambien
-    // lo reinicia: la ventana se fija al abrirlo y no se puede estirar sobre la marcha sin
-    // tirar lo que ya hay dentro, que es justo lo que nadie quiere que pase.
-    let mut settings = settings;
-    let cambia_como_graba = previous.replay_seconds != settings.replay_seconds
-        || previous.replay_screen != settings.replay_screen
-        || previous.replay_fps != settings.replay_fps;
-    if previous.replay_enabled != settings.replay_enabled
-        || (settings.replay_enabled && cambia_como_graba)
-    {
-        crate::replay::stop(&app)?;
-        if settings.replay_enabled {
-            if let Err(error) = crate::replay::start(&app) {
-                // Si no se ha podido encender, el ajuste no puede quedarse diciendo que si:
-                // el interruptor tiene que contar lo que esta pasando de verdad.
-                settings.replay_enabled = false;
-                state.settings.write().replay_enabled = false;
-                crate::settings::save(&app, &settings)?;
-                crate::hotkeys::register(&app, &settings);
-                return Err(error);
-            }
-        }
-    }
 
     // Se registra siempre, aunque la combinacion no haya cambiado: es la unica forma
     // de reintentar cuando el atajo estaba cogido por otra aplicacion y ya se ha
@@ -1034,38 +1011,6 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<Settings
     Ok(settings)
 }
 
-/// Lo que el menu de la bandeja necesita saber para pintarse.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TrayMenuState {
-    pub version: String,
-    /// Si hay una grabacion en marcha: entonces la entrada de grabar la para.
-    pub recording: bool,
-    /// Si el anillo de los ultimos segundos esta encendido.
-    pub replay: bool,
-    /// Los tres atajos, para ensennarlos al lado de su entrada como haria un menu bueno.
-    pub capture_shortcut: String,
-    pub record_shortcut: String,
-    pub replay_shortcut: String,
-}
-
-#[tauri::command]
-pub async fn tray_menu_state(app: AppHandle) -> Result<TrayMenuState> {
-    let state = app.state::<AppState>();
-    let settings = state.settings.read().clone();
-    // El guardia del anillo se suelta AQUI y no dentro del `Ok(...)`: dentro seguiria
-    // vivo al acabar el bloque, cuando `state` ya no esta, y eso no compila.
-    let anillo = state.replay.lock().is_some();
-    Ok(TrayMenuState {
-        version: app.package_info().version.to_string(),
-        recording: state.is_recording(),
-        replay: anillo,
-        capture_shortcut: settings.capture_shortcut,
-        record_shortcut: settings.record_shortcut,
-        replay_shortcut: settings.replay_shortcut,
-    })
-}
-
 /// Una entrada del menu, pulsada.
 ///
 /// Va al mismo sitio que iban las entradas del menu del sistema: `tray::ejecutar`. El menu
@@ -1073,15 +1018,7 @@ pub async fn tray_menu_state(app: AppHandle) -> Result<TrayMenuState> {
 /// congela la pantalla, y hacerlo con el menu todavia puesto lo mete en la foto.
 #[tauri::command]
 pub async fn tray_menu_action(app: AppHandle, action: String) -> Result<()> {
-    crate::tray_menu::esconder(&app);
     crate::tray::ejecutar(&app, &action);
-    Ok(())
-}
-
-/// El alto que ha medido el menu, para que la ventana se ajuste a su contenido.
-#[tauri::command]
-pub async fn resize_tray_menu(app: AppHandle, height: f64) -> Result<()> {
-    crate::tray_menu::redimensionar(&app, height);
     Ok(())
 }
 

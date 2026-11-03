@@ -85,8 +85,8 @@ export function ShortcutField({ value, onChange, active }: Props) {
       onClick={() => setRecording((r) => !r)}
       title={
         recording
-          ? t("Pulsa la combinación · las que Windows se reserva no llegan hasta aquí")
-          : t("Clic para cambiar el atajo")
+          ? t("Press the combination · the ones Windows keeps never reach here")
+          : t("Click to change the shortcut")
       }
       className={`flex h-8 min-w-[132px] items-center justify-end gap-1 rounded-lg border px-2 transition-colors ${
         recording
@@ -97,7 +97,7 @@ export function ShortcutField({ value, onChange, active }: Props) {
       }`}
     >
       {recording ? (
-        <span className="w-full text-center text-[11px] text-blue-300">{t("Pulsa las teclas…")}</span>
+        <span className="w-full text-center text-[11px] text-blue-300">{t("Press the keys…")}</span>
       ) : (
         parts.map((part, index) => (
           <kbd

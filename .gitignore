@@ -31,3 +31,7 @@ packaging/store/*.msix
 # El perfil de navegador con la sesion de Partner Center es una credencial.
 packaging/store/perfil*/
 .perfil*/
+.tools/
+artifacts/
+artifacts-*.txt
+artifacts-*.json

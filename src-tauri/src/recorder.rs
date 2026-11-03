@@ -236,7 +236,7 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
 
     let state = app.state::<AppState>();
     if state.is_recording() {
-        return Err(AppError::Msg("ya hay una grabación en curso".into()));
+        return Err(AppError::Msg("A recording is already in progress".into()));
     }
 
     windows_mgr::close_overlays(app);
@@ -338,13 +338,14 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
         },
         pause.clone(),
     );
+    let encoding = state.settings.read().encoding.clone();
     let writer = std::thread::spawn(move || -> Result<SessionData> {
         let mut session = session_seed;
         session.has_audio = audio.is_some();
         let (width, height) = (session.width, session.height);
         let mut cache = FrameCache::new(&session.dir)?;
         let mut salida = SalidaDeAudio::abrir(audio, session.audio_path());
-        let mut encoder = build_preview_encoder(&session, salida.formato());
+        let mut encoder = build_preview_encoder(&session, salida.formato(), &encoding);
         let pintar_al_vuelo = marcar_clics || marcar_teclas;
         let mut last_ts = 0u64;
         let mut dado_la_vuelta: Vec<u8> = Vec::new();
@@ -519,7 +520,6 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
     *state.recording.lock() = Some(recording);
     // El menu de la bandeja, si estaba abierto, se queda fuera del video desde el primer
     // fotograma. El que se abra DESPUES lo resuelve el propio menu al ensennarse.
-    crate::tray_menu::fuera_de_la_grabacion(app, true);
     match windows_mgr::open_recorder(app, region) {
         Ok(label) => {
             if let Some(recording) = state.recording.lock().as_mut() {
@@ -551,6 +551,7 @@ pub fn start(_app: &AppHandle, _region: Rect, _options: RecordOptions) -> Result
 fn build_preview_encoder(
     session: &SessionData,
     audio: Option<crate::record::audio::Formato>,
+    encoding: &crate::settings::EncodingSettings,
 ) -> Option<windows_capture::encoder::VideoEncoder> {
     use windows_capture::encoder::{
         AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
@@ -574,13 +575,13 @@ fn build_preview_encoder(
         width: session.width,
         height: session.height,
         fps: session.fps,
-        quality: 75,
-    };
+        quality: encoding.quality,
+     bitrate_override: None };
     VideoEncoder::new(
         VideoSettingsBuilder::new(session.width, session.height)
             .sub_type(VideoSettingsSubType::H264)
             .frame_rate(session.fps)
-            .bitrate(options.bitrate()),
+            .bitrate(encoding.bitrate().unwrap_or_else(|| options.bitrate())),
         match audio {
             // El codificador recibe enteros de 16 bits, no la coma flotante que da el
             // mezclador: la conversion la hace `audio::a_pcm16` antes de entregarlo.
@@ -668,10 +669,10 @@ fn terminar(mut recording: RecordingState) -> Result<SessionData> {
     let writer = recording
         .writer
         .take()
-        .ok_or_else(|| AppError::Msg("la grabación no tenía escritor".into()))?;
+        .ok_or_else(|| AppError::Msg("The recording writer is unavailable".into()))?;
     writer
         .join()
-        .map_err(|_| AppError::Msg("el hilo de escritura se ha caído".into()))?
+        .map_err(|_| AppError::Msg("The recording writer stopped unexpectedly".into()))?
 }
 
 /// Para la grabacion y vuelve enseguida. Lo que tarda (las miniaturas, abrir el editor o
@@ -688,7 +689,6 @@ pub fn stop(app: &AppHandle) -> Result<()> {
         return Err(AppError::NoRecording);
     };
     avisar_barra(app, tick_de(&recording, true));
-    crate::tray_menu::fuera_de_la_grabacion(app, false);
     let open_editor = state.settings.read().open_editor_after_recording;
     let barra = recording.barra.clone();
 
@@ -758,7 +758,7 @@ fn entregar(app: &AppHandle, session: SessionData, open_editor: bool, barra: Opt
         // cartel de «preparando la reproduccion» se quedaba para siempre, sin porcentaje,
         // con el play apagado y sin decir que no iba a venir.
         if session.mp4_path.is_none() {
-            crate::replay::preparar_por_detras(app, session.id.clone());
+            crate::preview::preparar_por_detras(app, session.id.clone());
         }
     } else {
         // Sin editor, la grabacion se guarda sola en la carpeta de siempre, con los mismos
@@ -766,7 +766,9 @@ fn entregar(app: &AppHandle, session: SessionData, open_editor: bool, barra: Opt
         // archivo, sin aviso y sin forma de volver a ella: el ajuste decia «dejarla
         // guardada» y lo que hacia era perderla.
         let con_sonido = state.settings.read().play_sound;
-        match crate::exporter::export(app, peticion_por_defecto(&session)) {
+        let mut request = peticion_por_defecto(&session);
+        request.quality = state.settings.read().encoding.quality;
+        match crate::exporter::export(app, request) {
             Ok(resultado) => {
                 if con_sonido {
                     crate::platform::sonido::obturador();
@@ -792,8 +794,9 @@ pub(crate) fn peticion_por_defecto(session: &SessionData) -> crate::exporter::Ex
         to: session.frames.len().saturating_sub(1),
         width: session.width,
         height: session.height,
-        fps: session.fps.min(30),
+        fps: session.fps,
         quality: 80,
+        bitrate_override: None,
         audio: session.has_audio,
         loop_forever: true,
         margin: 0,
@@ -832,7 +835,6 @@ pub fn cancel(app: &AppHandle) -> Result<()> {
         return Err(AppError::NoRecording);
     };
     recording.descartar.store(true, Ordering::Relaxed);
-    crate::tray_menu::fuera_de_la_grabacion(app, false);
     cerrar_barra(app, recording.barra.clone());
     std::thread::spawn(move || match terminar(recording) {
         Ok(session) => {

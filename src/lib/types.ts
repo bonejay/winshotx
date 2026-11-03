@@ -42,7 +42,7 @@ export type Language = "sistema" | "es" | "en" | "zh";
 export type OverlayIntent = "capture" | "record" | "edit";
 
 /** Que se hara con el recorte. Se elige en la barra de arriba, antes de recortar. */
-export type CaptureMode = "still" | "video" | "gif";
+export type CaptureMode = "still" | "video";
 
 export interface OverlayPayload {
   monitor: MonitorInfo;
@@ -280,7 +280,18 @@ export interface ExportProgress {
   total: number;
 }
 
+export interface EncodingSettings {
+  engine: "native" | "ffmpeg";
+  encoder: string;
+  quality: number;
+  bitrateMbps: number;
+  preset: string;
+  gpu: string;
+  extraArgs: string;
+}
+
 export interface Settings {
+  encoding?: EncodingSettings;
   captureShortcut: string;
   /** Claro, oscuro, o lo que diga Windows. */
   theme: Theme;

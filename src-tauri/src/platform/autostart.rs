@@ -12,11 +12,11 @@ use crate::error::Result;
 #[cfg(windows)]
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(windows)]
-const VALUE_NAME: &str = "winshotx";
+const VALUE_NAME: &str = "winshotx-english";
 /// Donde el instalador de NSIS deja apuntada la carpeta que eligio el usuario.
 #[cfg(windows)]
 const UNINSTALL_KEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\Uninstall\winshotx";
+    r"Software\Microsoft\Windows\CurrentVersion\Uninstall\WinShotX English";
 /// El mismo identificador que lleva `windows.startupTask` en el AppxManifest.
 #[cfg(windows)]
 const TAREA_MSIX: &str = "winshotxAutoStart";
@@ -42,35 +42,35 @@ fn set_msix(enabled: bool) -> Result<()> {
     use windows::core::HSTRING;
     use windows::ApplicationModel::{StartupTask, StartupTaskState};
 
-    let fallo = |que: &str| crate::error::AppError::Msg(format!("arranque automático: {que}"));
+    let fallo = |que: &str| crate::error::AppError::Msg(format!("Windows startup: {que}"));
 
     let tarea = esperar(
         StartupTask::GetAsync(&HSTRING::from(TAREA_MSIX))
-            .map_err(|_| fallo("Windows no encuentra la tarea del paquete"))?,
+            .map_err(|_| fallo("Windows could not find the startup task"))?,
     )
-    .map_err(|_| fallo("Windows no encuentra la tarea del paquete"))?;
+    .map_err(|_| fallo("Windows could not find the startup task"))?;
 
     if !enabled {
-        tarea.Disable().map_err(|_| fallo("no se ha podido quitar"))?;
+        tarea.Disable().map_err(|_| fallo("Could not disable the startup task"))?;
         return Ok(());
     }
 
     let estado = esperar(
         tarea
             .RequestEnableAsync()
-            .map_err(|_| fallo("no se ha podido pedir"))?,
+            .map_err(|_| fallo("Could not request startup permission"))?,
     )
-    .map_err(|_| fallo("no se ha podido pedir"))?;
+    .map_err(|_| fallo("Could not request startup permission"))?;
 
     match estado {
         StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy => Ok(()),
         StartupTaskState::DisabledByUser => Err(fallo(
-            "lo has desactivado en el Administrador de tareas, actívalo ahí",
+            "Enable the startup task in Task Manager first",
         )),
         StartupTaskState::DisabledByPolicy => {
-            Err(fallo("lo tiene bloqueado la política del equipo"))
+            Err(fallo("Startup is blocked by a device policy"))
         }
-        _ => Err(fallo("Windows lo ha rechazado")),
+        _ => Err(fallo("Windows rejected the startup request")),
     }
 }
 
@@ -133,7 +133,7 @@ fn set_registro(enabled: bool) -> Result<()> {
         );
         if status.is_err() {
             return Err(crate::error::AppError::Msg(
-                "no se ha podido abrir el registro de arranque".into(),
+                "Could not open the startup registry key".into(),
             ));
         }
 
@@ -150,7 +150,7 @@ fn set_registro(enabled: bool) -> Result<()> {
 
         if result.is_err() {
             return Err(crate::error::AppError::Msg(
-                "no se ha podido escribir el arranque automático".into(),
+                "Could not save the Windows startup preference".into(),
             ));
         }
     }

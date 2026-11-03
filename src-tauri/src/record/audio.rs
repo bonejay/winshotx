@@ -145,7 +145,7 @@ pub fn empezar(fuentes: Fuentes, pausa: Arc<AtomicBool>) -> Result<Captura> {
 
     let formato = formato_rx
         .recv()
-        .map_err(|_| AppError::Msg("el hilo de audio no ha llegado a arrancar".into()))??;
+        .map_err(|_| AppError::Msg("Could not start audio capture".into()))??;
 
     Ok(Captura {
         parar,
@@ -213,7 +213,7 @@ fn capturar(
         None
     };
 
-    unsafe { cliente.Start() }.map_err(|e| AppError::Msg(format!("no arranca el audio: {e}")))?;
+    unsafe { cliente.Start() }.map_err(|e| AppError::Msg(format!("Could not start audio: {e}")))?;
 
     // El reloj de pared de la grabacion, descontando las pausas. Es el que manda cuando el
     // maestro se calla: ver `SEQUIA`.
@@ -229,7 +229,7 @@ fn capturar(
         let mut llego_algo = false;
         loop {
             let disponible = unsafe { captura.GetNextPacketSize() }
-                .map_err(|e| AppError::Msg(format!("no se puede leer el audio: {e}")))?;
+                .map_err(|e| AppError::Msg(format!("Could not read audio: {e}")))?;
             if disponible == 0 {
                 break;
             }
@@ -240,7 +240,7 @@ fn capturar(
             unsafe {
                 captura.GetBuffer(&mut datos, &mut instantes, &mut banderas, None, None)
             }
-            .map_err(|e| AppError::Msg(format!("no se puede coger el audio: {e}")))?;
+            .map_err(|e| AppError::Msg(format!("Could not acquire audio: {e}")))?;
 
             let bytes = instantes as usize * formato.bytes_por_instante() as usize;
             // AUDCLNT_BUFFERFLAGS_SILENT vale 2: Windows dice "aqui no suena nada" y no se
@@ -252,7 +252,7 @@ fn capturar(
                 unsafe { std::slice::from_raw_parts(datos, bytes) }.to_vec()
             };
             unsafe { captura.ReleaseBuffer(instantes) }
-                .map_err(|e| AppError::Msg(format!("no se puede soltar el audio: {e}")))?;
+                .map_err(|e| AppError::Msg(format!("Could not release audio: {e}")))?;
             llego_algo = true;
 
             // En pausa se tira lo leido, del sistema y del microfono. `escritos` no avanza,
@@ -467,25 +467,25 @@ enum Dispositivo {
 /// Abre el aparato que se le pida y devuelve con que formato esta trabajando.
 unsafe fn abrir(que: Dispositivo) -> Result<(IAudioClient, IAudioCaptureClient, Formato)> {
     let enumerador: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-        .map_err(|e| AppError::Msg(format!("no se encuentran los dispositivos de sonido: {e}")))?;
+        .map_err(|e| AppError::Msg(format!("Could not enumerate audio devices: {e}")))?;
     // `eRender` es la salida (los altavoces) y `eCapture` la entrada (el microfono).
     // `eConsole` es el uso normal, no el de comunicaciones: es el que sigue al aparato que
     // el usuario tiene puesto en Windows.
     let (flujo, nombre) = match que {
-        Dispositivo::Altavoz => (eRender, "altavoz"),
-        Dispositivo::Microfono => (eCapture, "micrófono"),
+        Dispositivo::Altavoz => (eRender, "speaker"),
+        Dispositivo::Microfono => (eCapture, "microphone"),
     };
     let dispositivo = enumerador
         .GetDefaultAudioEndpoint(flujo, eConsole)
-        .map_err(|e| AppError::Msg(format!("no hay {nombre} por defecto: {e}")))?;
+        .map_err(|e| AppError::Msg(format!("No default {nombre}: {e}")))?;
 
     let cliente: IAudioClient = dispositivo
         .Activate(CLSCTX_ALL, None)
-        .map_err(|e| AppError::Msg(format!("no se puede abrir el {nombre}: {e}")))?;
+        .map_err(|e| AppError::Msg(format!("Could not open {nombre}: {e}")))?;
 
     let formato_ptr = cliente
         .GetMixFormat()
-        .map_err(|e| AppError::Msg(format!("no se sabe en qué formato suena: {e}")))?;
+        .map_err(|e| AppError::Msg(format!("Could not determine the audio format: {e}")))?;
     // El formato lo reserva Windows y hay que devolverlo, tanto si esto sale bien como si
     // no: se copia lo que interesa y se suelta en el acto.
     let formato = Formato {
@@ -509,11 +509,11 @@ unsafe fn abrir(que: Dispositivo) -> Result<(IAudioClient, IAudioCaptureClient, 
         None,
     );
     CoTaskMemFree(Some(formato_ptr as *const _));
-    inicio.map_err(|e| AppError::Msg(format!("no se puede escuchar el {nombre}: {e}")))?;
+    inicio.map_err(|e| AppError::Msg(format!("Could not capture {nombre}: {e}")))?;
 
     let captura: IAudioCaptureClient = cliente
         .GetService()
-        .map_err(|e| AppError::Msg(format!("no se puede leer del {nombre}: {e}")))?;
+        .map_err(|e| AppError::Msg(format!("Could not read from {nombre}: {e}")))?;
 
     Ok((cliente, captura, formato))
 }
@@ -525,7 +525,7 @@ impl Com {
     fn inicializar() -> Result<Self> {
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
             .ok()
-            .map_err(|e| AppError::Msg(format!("no se puede preparar el sonido: {e}")))?;
+            .map_err(|e| AppError::Msg(format!("Could not prepare audio: {e}")))?;
         Ok(Self)
     }
 }

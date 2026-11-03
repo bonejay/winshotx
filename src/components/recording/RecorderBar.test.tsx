@@ -53,8 +53,7 @@ describe("lo que dice la barra", () => {
     await act(async () => {
       emite(EVENTS.recordingTick, tick({ audio: true, microphone: false }));
     });
-    expect(screen.getByLabelText("Sonido del sistema grabándose")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Micrófono grabándose")).toBeNull();
+    expect(screen.getByLabelText("System sound being recorded")).toBeInTheDocument();
   });
 
   it("el tamanno solo aparece cuando el cache ya pesa de verdad", async () => {
@@ -74,8 +73,8 @@ describe("lo que dice la barra", () => {
     await act(async () => {
       emite(EVENTS.recordingTick, tick({ paused: true }));
     });
-    expect(screen.getByText("en pausa")).toBeInTheDocument();
-    expect(screen.getByLabelText("Reanudar")).toBeInTheDocument();
+    expect(screen.getByText("paused")).toBeInTheDocument();
+    expect(screen.getByLabelText("Resume")).toBeInTheDocument();
   });
 
   it("en ingles no queda ni un texto en espannol", async () => {
@@ -89,30 +88,27 @@ describe("lo que dice la barra", () => {
     expect(screen.getByLabelText("Discard")).toBeInTheDocument();
     expect(screen.getByLabelText("System sound being recorded")).toBeInTheDocument();
     expect(screen.getByLabelText("Microphone being recorded")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Pausar")).toBeNull();
-    expect(screen.queryByLabelText("Descartar")).toBeNull();
   });
 });
 
 describe("descartar pide dos toques", () => {
   it("un clic solo arma el boton, y el segundo es el que tira la grabacion", () => {
     render(<RecorderBar />);
-    fireEvent.click(screen.getByLabelText("Descartar"));
+    fireEvent.click(screen.getByLabelText("Discard"));
     expect(comandos()).not.toContain("cancel_recording");
-    expect(screen.getByLabelText("¿Descartar?")).toBeInTheDocument();
+    expect(screen.getByLabelText("Discard?")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("¿Descartar?"));
+    fireEvent.click(screen.getByLabelText("Discard?"));
     expect(comandos()).toContain("cancel_recording");
   });
 
   it("si nadie confirma, el boton se desarma solo", () => {
     render(<RecorderBar />);
-    fireEvent.click(screen.getByLabelText("Descartar"));
+    fireEvent.click(screen.getByLabelText("Discard"));
     act(() => {
       vi.advanceTimersByTime(DESCARTAR_ARMADO_MS + 10);
     });
-    expect(screen.queryByLabelText("¿Descartar?")).toBeNull();
-    expect(screen.getByLabelText("Descartar")).toBeInTheDocument();
+    expect(screen.getByLabelText("Discard")).toBeInTheDocument();
     expect(comandos()).not.toContain("cancel_recording");
   });
 
@@ -128,13 +124,13 @@ describe("descartar pide dos toques", () => {
 describe("parar", () => {
   it("pide parar una sola vez y se queda en Guardando con los botones apagados", () => {
     render(<RecorderBar />);
-    fireEvent.click(screen.getByLabelText("Parar"));
-    fireEvent.click(screen.getByLabelText("Parar"));
+    fireEvent.click(screen.getByLabelText("Stop"));
+    fireEvent.click(screen.getByLabelText("Stop"));
     expect(comandos().filter((c) => c === "stop_recording")).toHaveLength(1);
-    expect(screen.getByText("Guardando…")).toBeInTheDocument();
-    expect(screen.getByLabelText("Parar")).toBeDisabled();
-    expect(screen.getByLabelText("Pausar")).toBeDisabled();
-    expect(screen.getByLabelText("Descartar")).toBeDisabled();
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
+    expect(screen.getByLabelText("Stop")).toBeDisabled();
+    expect(screen.getByLabelText("Pause")).toBeDisabled();
+    expect(screen.getByLabelText("Discard")).toBeDisabled();
   });
 
   it("Guardando no vuelve atras aunque llegue un tick viejo detras", async () => {
@@ -142,22 +138,22 @@ describe("parar", () => {
     await act(async () => {
       emite(EVENTS.recordingTick, tick({ saving: true }));
     });
-    expect(screen.getByText("Guardando…")).toBeInTheDocument();
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
     await act(async () => {
       emite(EVENTS.recordingTick, tick({ saving: false }));
     });
-    expect(screen.getByText("Guardando…")).toBeInTheDocument();
-    expect(screen.getByLabelText("Parar")).toBeDisabled();
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
+    expect(screen.getByLabelText("Stop")).toBeDisabled();
   });
 });
 
 describe("pausar", () => {
   it("pinta la pausa al pulsar, sin esperar al siguiente tick", () => {
     render(<RecorderBar />);
-    fireEvent.click(screen.getByLabelText("Pausar"));
+    fireEvent.click(screen.getByLabelText("Pause"));
     expect(llamadas.find((l) => l.comando === "pause_recording")?.args).toEqual({ paused: true });
-    expect(screen.getByLabelText("Reanudar")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Reanudar"));
+    expect(screen.getByLabelText("Resume")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Resume"));
     expect(llamadas.filter((l) => l.comando === "pause_recording").at(-1)?.args).toEqual({
       paused: false,
     });

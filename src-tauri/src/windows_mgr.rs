@@ -187,7 +187,6 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     // fps y alto nativo, y congelar tres pantallas compitiendo con eso es lo que hacia que
     // el atajo se notara. Ver `replay::apartar`, que explica por que esto no deja un
     // agujero en lo grabado.
-    let anillo = crate::replay::apartar(app);
 
     // Los iconos se esconden solo lo que dura el disparo, no toda la seleccion: el
     // overlay tapa el escritorio de todas formas, asi que tenerlos escondidos mas rato no
@@ -204,7 +203,7 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     // cual tiene el raton antes de decidir por cual se empieza.
     let monitors = capture::monitors()?;
     if monitors.is_empty() {
-        return Err(crate::error::AppError::Msg("no se ha detectado ningún monitor".into()));
+        return Err(crate::error::AppError::Msg("No display was detected".into()));
     }
     let cursor = cursor_position();
 
@@ -251,7 +250,6 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
         // Los tres guardianes viven hasta que las dos tandas esten congeladas: el candado
         // de «hay una captura en marcha», el anillo apartado y los iconos escondidos.
         let candado = candado;
-        let anillo = anillo;
         let iconos = iconos;
         let primera_id = monitors[primera].id;
         for (numero, tanda) in [vec![primera], resto].into_iter().enumerate() {
@@ -287,7 +285,6 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
             });
         }
         drop(iconos);
-        drop(anillo);
         drop(candado);
 
         // Si alguna no avisa a tiempo, se ensenna igual: mejor ver la pantalla de error del

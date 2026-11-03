@@ -38,7 +38,6 @@ export default defineConfig({
         recorder: resolve(__dirname, "recorder.html"),
         cuenta: resolve(__dirname, "cuenta.html"),
         pin: resolve(__dirname, "pin.html"),
-        "tray-menu": resolve(__dirname, "tray-menu.html"),
       },
     },
   },

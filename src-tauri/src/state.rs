@@ -96,7 +96,6 @@ pub struct AppState {
     /// El anillo de los ultimos segundos, si esta encendido. Va aparte de `recording`
     /// porque puede convivir con una grabacion normal: son dos capturas distintas y quien
     /// esta grabando un tutorial no tiene por que perder lo que el anillo ya tenia.
-    pub replay: Mutex<Option<crate::replay::ReplayState>>,
     /// La ultima region capturada, en coordenadas del escritorio virtual. Sobrevive al
     /// cierre del overlay a proposito: repetir una captura solo sirve si se acuerda de la
     /// vez anterior, que fue otro disparo del atajo.
@@ -137,7 +136,6 @@ impl AppState {
             registered: RwLock::new(Vec::new()),
             intent: RwLock::new(OverlayIntent::Capture),
             recording: Mutex::new(None),
-            replay: Mutex::new(None),
             last_region: RwLock::new(None),
             temp_root,
             capturando: Arc::new(AtomicBool::new(false)),

@@ -122,7 +122,7 @@ export function RecorderBar() {
         )}
         <span
           role="timer"
-          aria-label={t("Tiempo grabado")}
+          aria-label={t("Time recorded")}
           className={`font-mono text-[15px] leading-none font-medium tabular-nums ${
             guardando ? "text-neutral-400" : "text-white"
           }`}
@@ -133,31 +133,31 @@ export function RecorderBar() {
 
       {/* Que se esta grabando: el formato, y el sonido solo si entra de verdad. */}
       {guardando ? (
-        <span className="text-[11px] leading-none text-neutral-400">{t("Guardando…")}</span>
+        <span className="text-[11px] leading-none text-neutral-400">{t("Saving…")}</span>
       ) : pausa ? (
-        <span className="text-[11px] leading-none text-amber-400">{t("en pausa")}</span>
+        <span className="text-[11px] leading-none text-amber-400">{t("paused")}</span>
       ) : (
         <span data-tauri-drag-region className="flex items-center gap-1.5">
           <span
-            title={tick.format === "gif" ? t("GIF animado") : t("Vídeo MP4")}
+            title={tick.format === "gif" ? t("Animated GIF") : t("MP4 video")}
             className="rounded-[5px] border border-white/10 px-1.5 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-neutral-300"
           >
             {tick.format === "gif" ? "GIF" : "MP4"}
           </span>
           {tick.audio && (
-            <span title={t("Sonido del sistema grabándose")} aria-label={t("Sonido del sistema grabándose")} role="img">
+            <span title={t("System sound being recorded")} aria-label={t("System sound being recorded")} role="img">
               <Volume2 className="size-3.5 text-neutral-400" aria-hidden="true" />
             </span>
           )}
           {tick.microphone && (
-            <span title={t("Micrófono grabándose")} aria-label={t("Micrófono grabándose")} role="img">
+            <span title={t("Microphone being recorded")} aria-label={t("Microphone being recorded")} role="img">
               <Mic className="size-3.5 text-neutral-400" aria-hidden="true" />
             </span>
           )}
           {/* El tamanno solo cuando importa: por encima del aviso, en ambar. */}
           {cacheGrande && (
             <span
-              title={t("La caché sin pérdida está ocupando mucho disco: para y exporta")}
+              title={t("The lossless cache is taking up a lot of disk: stop and export")}
               className="text-[11px] leading-none tabular-nums text-amber-400"
             >
               {formatBytes(tick.bytes)}
@@ -169,14 +169,14 @@ export function RecorderBar() {
       <span className="ml-auto flex items-center gap-1">
         <IconButton
           icon={pausa ? Play : Pause}
-          label={pausa ? t("Reanudar") : t("Pausar")}
-          shortcut={t("Espacio")}
+          label={pausa ? t("Resume") : t("Pause")}
+          shortcut={t("Space")}
           onClick={pausar}
           disabled={guardando}
         />
         <IconButton
           icon={Square}
-          label={t("Parar")}
+          label={t("Stop")}
           accent
           showLabel={!armado}
           disabled={guardando}
@@ -186,8 +186,8 @@ export function RecorderBar() {
           type="button"
           onClick={descartar}
           disabled={guardando}
-          aria-label={armado ? t("¿Descartar?") : t("Descartar")}
-          title={armado ? t("Otra vez para tirar la grabación") : `${t("Descartar")} · Esc`}
+          aria-label={armado ? t("Discard?") : t("Discard")}
+          title={armado ? t("Once more to throw the recording away") : `${t("Discard")} · Esc`}
           className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium whitespace-nowrap transition-colors duration-100 disabled:pointer-events-none disabled:opacity-40 ${
             armado
               ? "bg-red-500 text-white hover:bg-red-400"
@@ -195,7 +195,7 @@ export function RecorderBar() {
           }`}
         >
           <Trash2 className="size-[18px] shrink-0" strokeWidth={1.9} />
-          {armado && <span className="pr-0.5">{t("¿Descartar?")}</span>}
+          {armado && <span className="pr-0.5">{t("Discard?")}</span>}
         </button>
       </span>
     </div>

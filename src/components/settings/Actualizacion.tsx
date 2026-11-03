@@ -108,19 +108,19 @@ export function useActualizacion(version: string, recienActualizado = false) {
   const texto = () => {
     switch (fase.tipo) {
       case "mirando":
-        return t("mirando si hay versión nueva…");
+        return t("checking for a new version…");
       case "tienda":
-        return t("la Microsoft Store se encarga de actualizarla");
+        return t("the Microsoft Store keeps this one updated");
       case "aldia":
-        return t("estás en la última versión");
+        return t("you are on the latest version");
       case "acabadeactualizarse":
-        return t("actualizado a la {v}", { v: version });
+        return t("updated to {v}", { v: version });
       case "hay":
-        return t("la {v} ya está disponible", { v: fase.update.version });
+        return t("{v} is available", { v: fase.update.version });
       case "bajando":
-        return t("descargando la {v}… {pct} %", { v: fase.version, pct: fase.pct });
+        return t("downloading {v}… {pct} %", { v: fase.version, pct: fase.pct });
       case "listo":
-        return t("instalada, solo falta reiniciar");
+        return t("installed, it just needs a restart");
       case "error":
         return fase.mensaje;
       default:
@@ -170,8 +170,8 @@ export function EstadoActualizacion({
         type="button"
         onClick={mirar}
         disabled={fase.tipo === "mirando"}
-        title={texto || t("Buscar")}
-        aria-label={texto || t("Buscar")}
+        title={texto || t("Check")}
+        aria-label={texto || t("Check")}
         className={`flex h-7 items-center justify-center gap-1.5 rounded-lg transition-colors hover:bg-realce ${
           alDia ? "px-2" : "w-7"
         }`}
@@ -179,7 +179,7 @@ export function EstadoActualizacion({
         {alDia ? (
           <>
             <Check className="size-4 text-emerald-400" />
-            <span className="text-[11.5px] text-apagado">{t("Al día")}</span>
+            <span className="text-[11.5px] text-apagado">{t("Up to date")}</span>
           </>
         ) : (
           <RefreshCw
@@ -227,7 +227,7 @@ export function BotonActualizar({
         onClick={() => instalar(fase.update)}
         className={`${base} bg-blue-500 font-semibold text-white hover:bg-blue-400`}
       >
-        <Download className="size-3.5" /> {t("Actualizar ahora")}
+        <Download className="size-3.5" /> {t("Update now")}
       </button>
     );
   }
@@ -253,7 +253,7 @@ export function BotonActualizar({
         onClick={() => void relaunch()}
         className={`${base} bg-emerald-500/15 font-semibold text-emerald-300 hover:bg-emerald-500/25`}
       >
-        <RotateCcw className="size-3.5" /> {t("Reiniciar")}
+        <RotateCcw className="size-3.5" /> {t("Restart")}
       </button>
     );
   }
@@ -266,7 +266,7 @@ export function BotonActualizar({
       className={`${base} border border-linea-fuerte text-suave hover:bg-realce hover:text-titulo`}
     >
       <RefreshCw className={`size-3.5 ${fase.tipo === "mirando" ? "animate-spin" : ""}`} />
-      {t("Buscar")}
+      {t("Check")}
     </button>
   );
 }

@@ -6,28 +6,28 @@ use serde::{Serialize, Serializer};
 pub enum AppError {
     #[error("{0}")]
     Msg(String),
-    #[error("no hay ninguna grabación en curso")]
+    #[error("No recording is in progress")]
     NoRecording,
-    #[error("sesión desconocida: {0}")]
+    #[error("Unknown session: {0}")]
     UnknownSession(String),
-    #[error("esta función solo está implementada en Windows")]
+    #[error("This feature is only available on Windows")]
     #[allow(dead_code)]
     Unsupported,
-    #[error("error de entrada/salida: {0}")]
+    #[error("Input/output error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("error de Tauri: {0}")]
+    #[error("Tauri error: {0}")]
     Tauri(#[from] tauri::Error),
-    #[error("error de imagen: {0}")]
+    #[error("Image error: {0}")]
     Image(#[from] image::ImageError),
-    #[error("error de JSON: {0}")]
+    #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("error de GIF: {0}")]
+    #[error("GIF error: {0}")]
     Gif(#[from] gif::EncodingError),
-    #[error("error de QOI: {0}")]
+    #[error("QOI error: {0}")]
     Qoi(#[from] qoi::Error),
     /// Lo que devuelven las APIs modernas de Windows (WinRT), como el lector de texto.
     #[cfg(windows)]
-    #[error("error de Windows: {0}")]
+    #[error("Windows error: {0}")]
     Windows(#[from] windows::core::Error),
 }
 

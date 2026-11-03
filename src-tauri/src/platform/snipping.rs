@@ -103,7 +103,7 @@ pub fn write(value: u32) -> Result<()> {
         .is_err()
         {
             return Err(AppError::Msg(
-                "no se ha podido abrir la configuración del teclado".into(),
+                "Could not open keyboard settings".into(),
             ));
         }
         let bytes = value.to_le_bytes();
@@ -111,7 +111,7 @@ pub fn write(value: u32) -> Result<()> {
         let _ = RegCloseKey(key);
         if status.is_err() {
             return Err(AppError::Msg(
-                "no se ha podido cambiar la tecla Impr Pant".into(),
+                "Could not change the Print Screen shortcut".into(),
             ));
         }
     }
@@ -217,7 +217,7 @@ pub fn write_disabled_hotkeys(letras: Option<&str>) -> Result<()> {
         .is_err()
         {
             return Err(AppError::Msg(
-                "no se ha podido abrir la configuración de atajos de Windows".into(),
+                "Could not open Windows shortcut settings".into(),
             ));
         }
         let resultado = match letras.filter(|l| !l.is_empty()) {
@@ -235,7 +235,7 @@ pub fn write_disabled_hotkeys(letras: Option<&str>) -> Result<()> {
         let _ = RegCloseKey(key);
         if resultado.is_err() {
             return Err(AppError::Msg(
-                "no se han podido cambiar los atajos de Windows".into(),
+                "Could not change Windows shortcuts".into(),
             ));
         }
     }
@@ -265,7 +265,7 @@ pub fn uninstall_snipping_tool() -> Result<bool> {
 
     if !salida.status.success() {
         return Err(AppError::Msg(
-            "Windows no ha dejado quitar la Herramienta de Recortes".into(),
+            "Windows could not remove Snipping Tool".into(),
         ));
     }
     // Devuelve si habia algo que quitar, para poder decirlo sin mentir.
@@ -319,7 +319,7 @@ pub fn restart_shell() -> Result<()> {
         }
     }
     Err(AppError::Msg(
-        "el Explorador no ha vuelto solo; reinicia el equipo".into(),
+        "Windows Explorer did not restart; restart your computer".into(),
     ))
 }
 

@@ -201,7 +201,7 @@ pub fn freeze_monitors(indices: &[usize]) -> Result<Vec<Freeze>> {
                     let suyos = xcap::Monitor::all().map_err(|e| AppError::Msg(e.to_string()))?;
                     let monitor = suyos
                         .get(index)
-                        .ok_or_else(|| AppError::Msg("una pantalla ha desaparecido".into()))?;
+                        .ok_or_else(|| AppError::Msg("A display was disconnected".into()))?;
                     let info = describir(index, monitor)?;
                     let image = fotografiar(monitor, &info)?;
                     Ok((index, info, image))
@@ -212,13 +212,13 @@ pub fn freeze_monitors(indices: &[usize]) -> Result<Vec<Freeze>> {
             .into_iter()
             .map(|h| {
                 h.join()
-                    .map_err(|_| AppError::Msg("una pantalla ha fallado al congelarse".into()))?
+                    .map_err(|_| AppError::Msg("Could not freeze a display".into()))?
             })
             .collect()
     })?;
 
     if capturas.is_empty() {
-        return Err(AppError::Msg("no se ha detectado ningún monitor".into()));
+        return Err(AppError::Msg("No display was detected".into()));
     }
 
     // Y cada una se comprime a PNG en su propio hilo, que es lo que se le manda al
@@ -244,7 +244,7 @@ pub fn freeze_monitors(indices: &[usize]) -> Result<Vec<Freeze>> {
             .map(|handle| {
                 handle
                     .join()
-                    .map_err(|_| AppError::Msg("un hilo de compresion ha fallado".into()))?
+                    .map_err(|_| AppError::Msg("Image compression failed".into()))?
             })
             .collect()
     })
@@ -360,7 +360,7 @@ pub fn crop_from_freeze(freezes: &[Freeze], region: Rect) -> Result<image::RgbaI
         .iter()
         .find(|f| f.monitor.contains(cx, cy))
         .or_else(|| freezes.first())
-        .ok_or_else(|| AppError::Msg("no hay pantalla congelada".into()))?;
+        .ok_or_else(|| AppError::Msg("No frozen display is available".into()))?;
 
     let image = &freeze.image;
     let local_x = (region.x - freeze.monitor.x).max(0) as u32;
@@ -368,7 +368,7 @@ pub fn crop_from_freeze(freezes: &[Freeze], region: Rect) -> Result<image::RgbaI
     let width = region.width.min(image.width().saturating_sub(local_x));
     let height = region.height.min(image.height().saturating_sub(local_y));
     if width == 0 || height == 0 {
-        return Err(AppError::Msg("la selección queda fuera de la pantalla".into()));
+        return Err(AppError::Msg("The selection is outside the display".into()));
     }
     Ok(image::imageops::crop_imm(image.as_ref(), local_x, local_y, width, height).to_image())
 }
@@ -407,7 +407,7 @@ pub fn virtual_desktop(freezes: &[Freeze]) -> Option<Rect> {
 /// huecos salen negros. No hay nada que arreglar en eso, solo que no sorprenda.
 pub fn stitch_all(freezes: &[Freeze]) -> Result<(image::RgbaImage, Rect)> {
     let marco = virtual_desktop(freezes)
-        .ok_or_else(|| AppError::Msg("no hay ninguna pantalla congelada".into()))?;
+        .ok_or_else(|| AppError::Msg("No frozen displays are available".into()))?;
 
     let mut lienzo = image::RgbaImage::from_pixel(marco.width, marco.height, image::Rgba([0, 0, 0, 0]));
 

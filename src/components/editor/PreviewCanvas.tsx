@@ -57,7 +57,7 @@ export function PreviewCanvas({
       <img src={posterUrl} alt="" className="size-full object-contain" />
     ) : (
       <div className="flex size-full items-center justify-center">
-        <span className="text-xs text-neutral-500">{t("Sin vista previa")}</span>
+        <span className="text-xs text-neutral-500">{t("No preview")}</span>
       </div>
     );
   }
@@ -84,7 +84,7 @@ export function PreviewCanvas({
       onPause={() => onPlaying(false)}
       onError={() => {
         const codigo = videoRef.current?.error;
-        onFallo(codigo?.message || t("el vídeo de vista previa no se ha podido abrir"));
+        onFallo(codigo?.message || t("the preview video would not open"));
       }}
       onTimeUpdate={(e) => {
         const ms = e.currentTarget.currentTime * 1000;

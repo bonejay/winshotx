@@ -66,7 +66,7 @@ beforeEach(() => {
 /** Monta el overlay y espera a que el congelado esté puesto y la barra pintada. */
 async function abrir() {
   const { container } = render(<SelectionCanvas monitorId={1} />);
-  await screen.findByLabelText("Foto");
+  await screen.findByLabelText("Photo");
   return container.firstElementChild as HTMLElement;
 }
 
@@ -111,7 +111,7 @@ describe("la barra de arriba no se queda el sitio", () => {
     // La barra tapa una franja del centro de arriba, y ahí no había forma de arrastrar:
     // el botón se quedaba el gesto entero.
     const lienzo = await abrir();
-    const boton = screen.getByLabelText("Foto");
+    const boton = screen.getByLabelText("Photo");
     fireEvent.pointerDown(boton, { clientX: EN_LA_BARRA.x, clientY: EN_LA_BARRA.y, buttons: 1 });
     fireEvent.pointerMove(lienzo, { clientX: EN_LA_BARRA.x + 260, clientY: 190, buttons: 1 });
     fireEvent.pointerMove(window, { clientX: EN_LA_BARRA.x + 260, clientY: 190, buttons: 1 });
@@ -122,7 +122,7 @@ describe("la barra de arriba no se queda el sitio", () => {
 
   it("pero un clic seco sigue siendo del botón, y no recorta nada", async () => {
     await abrir();
-    const boton = screen.getByLabelText("GIF");
+    const boton = screen.getByLabelText("Video");
     fireEvent.pointerDown(boton, { clientX: EN_LA_BARRA.x, clientY: EN_LA_BARRA.y, buttons: 1 });
     fireEvent.pointerUp(boton, { clientX: EN_LA_BARRA.x, clientY: EN_LA_BARRA.y });
     fireEvent.click(boton);
@@ -135,7 +135,7 @@ describe("la barra de arriba no se queda el sitio", () => {
     // El gesto queda apuntado hasta que se sepa qué es. Si no se borra al soltar, el
     // siguiente movimiento del ratón, ya sin botón, se ponía a recortar por su cuenta.
     const lienzo = await abrir();
-    const boton = screen.getByLabelText("Foto");
+    const boton = screen.getByLabelText("Photo");
     fireEvent.pointerDown(boton, { clientX: EN_LA_BARRA.x, clientY: EN_LA_BARRA.y, buttons: 1 });
     fireEvent.pointerUp(boton, { clientX: EN_LA_BARRA.x, clientY: EN_LA_BARRA.y });
 
@@ -156,14 +156,14 @@ describe("el interruptor de la barra de acciones", () => {
     await waitFor(() =>
       expect(llamadas.some((l) => l.comando === "capture_still")).toBe(true),
     );
-    expect(screen.queryByLabelText("Copiar")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
   });
 
   it("Ctrl+Mayús+S guarda donde diga el usuario, y Ctrl+S en la carpeta de siempre", async () => {
     const lienzo = await abrir();
     emite(EVENTS.overlayMode, { mode: "still", fullScreen: false, withToolbar: true });
     arrastrar(lienzo, { x: 200, y: 300 }, { x: 500, y: 500 });
-    expect(await screen.findByLabelText("Guardar en…")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Save to…")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true, shiftKey: true });
     await waitFor(() =>
@@ -179,7 +179,7 @@ describe("el interruptor de la barra de acciones", () => {
 
     arrastrar(lienzo, { x: 200, y: 300 }, { x: 500, y: 500 });
 
-    expect(await screen.findByLabelText("Copiar")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Copy")).toBeInTheDocument();
     expect(llamadas.some((l) => l.comando === "capture_still")).toBe(false);
   });
 
@@ -187,7 +187,7 @@ describe("el interruptor de la barra de acciones", () => {
     // Y se guarda con `set_capture_flow`, NO con `set_settings`: aquel reengancha los
     // atajos globales y el anillo, con la captura abierta delante.
     await abrir();
-    fireEvent.click(screen.getByLabelText("Elegir qué hacer"));
+    fireEvent.click(screen.getByLabelText("Choose what to do"));
 
     await waitFor(() => {
       const guardado = llamadas.find((l) => l.comando === "set_capture_flow");
@@ -207,7 +207,7 @@ describe("el interruptor de la barra de acciones", () => {
 
   it("y los ajustes se abren desde la barra", async () => {
     await abrir();
-    fireEvent.click(screen.getByLabelText("Ajustes"));
+    fireEvent.click(screen.getByLabelText("Settings"));
     await waitFor(() =>
       expect(llamadas.some((l) => l.comando === "open_settings")).toBe(true),
     );
@@ -234,7 +234,7 @@ describe("la tecla que captura y abre el editor", () => {
       llamadas.find((l) => l.comando === "capture_still")?.args as { action: string }
     ).action;
     expect(accion).toBe("edit");
-    expect(screen.queryByLabelText("Copiar")).toBeNull();
+    expect(screen.queryByLabelText("Copy")).toBeNull();
   });
 
   /** Y la tecla de siempre sigue sacando la barra: no se le ha quitado nada a nadie. */
@@ -244,7 +244,7 @@ describe("la tecla que captura y abre el editor", () => {
 
     arrastrar(lienzo, { x: 200, y: 300 }, { x: 500, y: 500 });
 
-    expect(await screen.findByLabelText("Copiar")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Copy")).toBeInTheDocument();
     expect(llamadas.some((l) => l.comando === "capture_still")).toBe(false);
   });
 });
@@ -380,8 +380,8 @@ describe("la pantalla entera con la barra puesta", () => {
     fireEvent.pointerDown(lienzo, { clientX: 400, clientY: 300, buttons: 1 });
     fireEvent.pointerUp(window, { clientX: 400, clientY: 300 });
 
-    await waitFor(() => expect(screen.getByLabelText("Copiar")).toBeDefined());
-    expect(screen.getByLabelText("Editar")).toBeDefined();
+    await waitFor(() => expect(screen.getByLabelText("Copy")).toBeDefined());
+    expect(screen.getByLabelText("Edit")).toBeDefined();
     expect(llamadas.some((l) => l.comando === "capture_still")).toBe(false);
   });
 
@@ -392,7 +392,7 @@ describe("la pantalla entera con la barra puesta", () => {
     fireEvent.pointerDown(lienzo, { clientX: 400, clientY: 300, buttons: 1 });
     fireEvent.pointerUp(window, { clientX: 400, clientY: 300 });
 
-    const barra = (await screen.findByLabelText("Copiar")).closest("div.absolute") as HTMLElement;
+    const barra = (await screen.findByLabelText("Copy")).closest("div.absolute") as HTMLElement;
     const top = parseFloat(barra.style.top);
     // Volteada, `top` es el borde de ABAJO de la barra; si no, el de arriba.
     const volteada = barra.className.includes("-translate-y-full");
@@ -434,9 +434,9 @@ describe("solo la pantalla del ratón pinta la interfaz", () => {
     // y el resalte, donde se quedó el cursor.
     const lienzo = await abrir();
     fireEvent.pointerLeave(lienzo);
-    expect(screen.queryByLabelText("Foto")).toBeNull();
+    expect(screen.queryByLabelText("Photo")).toBeNull();
 
     fireEvent.pointerMove(lienzo, { clientX: 400, clientY: 300 });
-    expect(screen.getByLabelText("Foto")).toBeTruthy();
+    expect(screen.getByLabelText("Photo")).toBeTruthy();
   });
 });

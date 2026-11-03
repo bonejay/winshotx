@@ -93,7 +93,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     if (!sessionId) {
-      setError(t("Falta el identificador de sesión"));
+      setError(t("The session id is missing"));
       return;
     }
     Promise.all([
@@ -217,12 +217,12 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
     try {
       const { marcas, resumen } = await tapaDatos(sessionId, currentIndex);
       if (marcas.length === 0) {
-        setAviso(t("No he encontrado datos personales en esta imagen"));
+        setAviso(t("No personal data found in this image"));
         return;
       }
       setAnotaciones((previas) => [...previas, ...marcas]);
       const detalle = resumen.map(([clase, cuantos]) => `${cuantos} ${clase}`).join(", ");
-      setAviso(t("Tapado: {detalle}", { detalle }));
+      setAviso(t("Covered up: {detalle}", { detalle }));
     } catch (e) {
       setAviso(String(e));
     } finally {
@@ -238,7 +238,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
     try {
       const texto = await copiaTexto(sessionId, currentIndex);
       const palabras = texto.trim().split(/\s+/).length;
-      setAviso(t("Texto copiado: {palabras} palabras", { palabras }));
+      setAviso(t("Text copied: {palabras} words", { palabras }));
     } catch (e) {
       setAviso(String(e));
     } finally {
@@ -483,7 +483,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
   if (!session || !settings || frames.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-[#161618] text-sm text-neutral-500">
-        {t("Preparando la sesión…")}
+        {t("Getting the session ready…")}
       </div>
     );
   }
@@ -580,7 +580,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
             {videoUrl && falloDeVideo && (
               <div className="pointer-events-none absolute top-3 left-1/2 max-w-[80%] -translate-x-1/2">
                 <span className="block truncate rounded-full bg-red-950/85 px-3 py-1.5 text-[12px] text-red-200 shadow-lg backdrop-blur-md">
-                  {t("Este vídeo no se puede reproducir")} · {falloDeVideo}
+                  {t("This video will not play")} · {falloDeVideo}
                 </span>
               </div>
             )}
@@ -600,7 +600,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     <button
                       type="button"
                       onClick={togglePlay}
-                      aria-label={playing ? t("Pausar") : t("Reproducir")}
+                      aria-label={playing ? t("Pause") : t("Play")}
                       className="flex size-8 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
                     >
                       {playing ? <Pause className="size-4" /> : <Play className="size-4 pl-px" />}
@@ -608,17 +608,17 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                   ) : previaFallida ? (
                     <span
                       className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-amber-300/90"
-                      title={t("Se puede recortar y exportar igual: lo que no va a funcionar es el play")}
+                      title={t("You can still crop it and export it: the only thing off is playing it")}
                     >
                       <VideoOff className="size-4" />
-                      {t("Sin vista previa")}
+                      {t("No preview")}
                     </span>
                   ) : (
                     <span className="flex items-center gap-2 rounded-full px-1.5 py-1 text-[11px] whitespace-nowrap text-neutral-300">
                       <AnilloDeEspera porCiento={porCiento} />
                       {porCiento > 0
-                        ? `${t("Preparando el vídeo…")} ${porCiento}%`
-                        : t("Preparando el vídeo…")}
+                        ? `${t("Getting the video ready…")} ${porCiento}%`
+                        : t("Getting the video ready…")}
                     </span>
                   )}
                   {/*
@@ -634,17 +634,17 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     type="button"
                     onClick={() => markIn(currentIndex)}
                     className="flex items-center gap-1 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
-                    title={t("Empezar el trozo aquí (I)")}
+                    title={t("Start the clip here (I)")}
                   >
-                    <Scissors className="size-3.5" /> {t("Inicio")}
+                    <Scissors className="size-3.5" /> {t("Start")}
                   </button>
                   <button
                     type="button"
                     onClick={() => markOut(currentIndex)}
                     className="flex items-center gap-1 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
-                    title={t("Terminar el trozo aquí (O)")}
+                    title={t("End the clip here (O)")}
                   >
-                    <Scissors className="size-3.5 -scale-x-100" /> {t("Fin")}
+                    <Scissors className="size-3.5 -scale-x-100" /> {t("End")}
                   </button>
                   <span className="mx-0.5 h-4 w-px bg-white/10" />
                 </>
@@ -661,10 +661,10 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     ? "bg-blue-500 text-white"
                     : "text-neutral-300 hover:bg-white/10 hover:text-white"
                 }`}
-                title={t("Quedarse con un trozo de la imagen (C)")}
+                title={t("Keep just a piece of the image (C)")}
               >
                 <Crop className="size-3.5" />
-                {recorte ? recorteEnPixeles : t("Recortar")}
+                {recorte ? recorteEnPixeles : t("Crop")}
               </button>
               {recorte && (
                 <button
@@ -674,7 +674,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     setRecortando(false);
                   }}
                   className="rounded-full px-1.5 py-1 text-[11px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
-                  title={t("Quitar el recorte")}
+                  title={t("Remove the crop")}
                 >
                   ×
                 </button>

@@ -37,10 +37,10 @@ beforeEach(() => aplicarIdioma("es"));
 describe("lo que dice la barra", () => {
   it("nombra los tres modos y la pantalla entera", () => {
     pintar();
-    expect(screen.getByLabelText("Foto")).toBeInTheDocument();
-    expect(screen.getByLabelText("Vídeo")).toBeInTheDocument();
-    expect(screen.getByLabelText("GIF")).toBeInTheDocument();
-    expect(screen.getByLabelText("Pantalla entera")).toBeInTheDocument();
+    expect(screen.getByLabelText("Photo")).toBeInTheDocument();
+    expect(screen.getByLabelText("Video")).toBeInTheDocument();
+    expect(screen.queryByLabelText("GIF")).toBeNull();
+    expect(screen.getByLabelText("Whole screen")).toBeInTheDocument();
   });
 
   it("en ingles no queda ni un texto en espannol", () => {
@@ -52,16 +52,13 @@ describe("lo que dice la barra", () => {
     expect(screen.getByLabelText("Leave without capturing")).toBeInTheDocument();
     expect(screen.getByLabelText("Choose what to do")).toBeInTheDocument();
     expect(screen.getByLabelText("Settings")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Pantalla entera")).toBeNull();
-    expect(screen.queryByLabelText("Vídeo")).toBeNull();
-    expect(screen.queryByLabelText("Elegir qué hacer")).toBeNull();
   });
 
   it("los tooltips llevan la tecla que hace lo mismo", () => {
     pintar();
-    expect(screen.getByTitle("Foto del recorte · F")).toBeInTheDocument();
-    expect(screen.getByTitle("Grabar el recorte en MP4 · V")).toBeInTheDocument();
-    expect(screen.getByTitle("Pantalla entera, de un clic · P")).toBeInTheDocument();
+    expect(screen.getByTitle("Photo of the crop · F")).toBeInTheDocument();
+    expect(screen.getByTitle("Record the crop to MP4 · V")).toBeInTheDocument();
+    expect(screen.getByTitle("Whole screen, one click · P")).toBeInTheDocument();
   });
 
   it("y los tooltips tambien se traducen", () => {
@@ -75,25 +72,25 @@ describe("lo que dice la barra", () => {
 describe("lo que hace la barra", () => {
   it("marca como pulsado el modo que esta puesto, y solo ese", () => {
     pintar("video");
-    expect(screen.getByLabelText("Vídeo")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Foto")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText("Video")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Photo")).toHaveAttribute("aria-pressed", "false");
   });
 
   it("avisa del modo elegido al pulsarlo", () => {
     const { onChange } = pintar("still");
-    fireEvent.click(screen.getByLabelText("GIF"));
-    expect(onChange).toHaveBeenCalledWith("gif");
+    fireEvent.click(screen.getByLabelText("Video"));
+    expect(onChange).toHaveBeenCalledWith("video");
   });
 
   it("pantalla entera es un interruptor: pulsarlo estando puesto lo apaga", () => {
     const { onPantallaEntera } = pintar("still", true);
-    fireEvent.click(screen.getByLabelText("Pantalla entera"));
+    fireEvent.click(screen.getByLabelText("Whole screen"));
     expect(onPantallaEntera).toHaveBeenCalledWith(false);
   });
 
   it("la barra de acciones tambien es un interruptor, y dice como esta", () => {
     const { onConBarra } = pintar("still", false, true);
-    const boton = screen.getByLabelText("Elegir qué hacer");
+    const boton = screen.getByLabelText("Choose what to do");
     expect(boton).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(boton);
     expect(onConBarra).toHaveBeenCalledWith(false);
@@ -101,8 +98,8 @@ describe("lo que hace la barra", () => {
 
   it("apagada, pulsarla la vuelve a encender", () => {
     const { onConBarra } = pintar("still", false, false);
-    expect(screen.getByLabelText("Elegir qué hacer")).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByLabelText("Elegir qué hacer"));
+    expect(screen.getByLabelText("Choose what to do")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByLabelText("Choose what to do"));
     expect(onConBarra).toHaveBeenCalledWith(true);
   });
 
@@ -110,16 +107,14 @@ describe("lo que hace la barra", () => {
     // Ahi no es una preferencia, es donde se ajusta el recuadro antes de empezar a
     // grabar. Un interruptor que no hace nada es peor que no tenerlo.
     pintar("video");
-    expect(screen.queryByLabelText("Elegir qué hacer")).toBeNull();
-    pintar("gif");
-    expect(screen.queryByLabelText("Elegir qué hacer")).toBeNull();
+    expect(screen.queryByLabelText("Choose what to do")).toBeNull();
   });
 
   it("los ajustes se abren desde aqui, y ese boton no se queda pulsado", () => {
     // Desde una captura a pantalla completa no habia forma de llegar a los ajustes sin
     // cerrarla y buscar el icono de la bandeja.
     const { onAjustes } = pintar();
-    const boton = screen.getByLabelText("Ajustes");
+    const boton = screen.getByLabelText("Settings");
     expect(boton).not.toHaveAttribute("aria-pressed");
     fireEvent.click(boton);
     expect(onAjustes).toHaveBeenCalled();
@@ -145,7 +140,7 @@ describe("lo que hace la barra", () => {
         />
       </div>,
     );
-    fireEvent.pointerDown(screen.getByLabelText("Foto"));
+    fireEvent.pointerDown(screen.getByLabelText("Photo"));
     expect(lienzo).toHaveBeenCalled();
   });
 
@@ -156,7 +151,7 @@ describe("lo que hace la barra", () => {
     pintar();
     const barra = document.querySelector(SELECTOR_BARRA);
     expect(barra).not.toBeNull();
-    expect(barra!.contains(screen.getByLabelText("Foto"))).toBe(true);
+    expect(barra!.contains(screen.getByLabelText("Photo"))).toBe(true);
   });
 
   it("mientras se arrastra se quita del medio del todo", () => {

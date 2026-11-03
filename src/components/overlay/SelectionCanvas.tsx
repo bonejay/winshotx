@@ -539,7 +539,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
    * salta encima acaba dentro del vídeo; pidiéndole a Windows esa ventana, no.
    */
   const grabarVentana = useCallback(
-    async (ventana: VentanaDelSistema, format: "gif" | "video") => {
+    async (ventana: VentanaDelSistema, format: "video") => {
       if (!payload || busy || !ventana.hwnd) return;
       setBusy(true);
       setError(null);
@@ -563,7 +563,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   );
 
   const grabarRegion = useCallback(
-    async (rect: Rect, format: "gif" | "video") => {
+    async (rect: Rect, format: "video") => {
       if (!payload || busy) return;
       setBusy(true);
       setError(null);
@@ -680,8 +680,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         cambiarBarra(!conBarraRef.current);
       } else if (key === "f") {
         difundir({ mode: "still" });
-      } else if (key === "g") {
-        difundir({ mode: "gif" });
+
       } else if (key === "v") {
         difundir({ mode: "video" });
       } else if (key === "w") {
@@ -691,7 +690,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         const debajo = hoveredRef.current;
         if (!debajo?.hwnd) return;
         e.preventDefault();
-        void grabarVentana(debajo, modoRef.current === "gif" ? "gif" : "video");
+        void grabarVentana(debajo, "video");
       } else if (key === "r") {
         // La misma zona otra vez, sin volver a arrastrar. Solo responde la pantalla donde
         // cayo aquella region: en las demas no hay nada que repetir, asi que no hacen nada
@@ -972,7 +971,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
               */}
               {modo !== "still" && highlight.hwnd > 0 && (
                 <span className="ml-2 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {t("W: grabar solo esta ventana")}
+                  {t("W: record just this window")}
                 </span>
               )}
             </span>
@@ -1070,7 +1069,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
               style={{ backgroundColor: colorCopiado }}
             />
             <span className="font-mono uppercase">{colorCopiado}</span>
-            <span className="text-neutral-400">{t("copiado")}</span>
+            <span className="text-neutral-400">{t("copied")}</span>
           </div>
         </div>
       )}
@@ -1111,7 +1110,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
             <kbd className="rounded-[4px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-neutral-200">
               R
             </kbd>
-            la de antes
+            previous region
           </span>
         </div>
       )}

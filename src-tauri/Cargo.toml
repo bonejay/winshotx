@@ -1,7 +1,7 @@
 [package]
 name = "winshotx"
-version = "0.3.7"
-description = "Captura de pantalla y grabación GIF/MP4 local, ligera y open source"
+version = "0.4.0"
+description = "English screenshots and on-demand video recording"
 authors = ["munir"]
 license = "MIT"
 edition = "2021"

@@ -59,7 +59,7 @@ mod tests {
             &retardos,
             &mut cargar,
             &ruta,
-            &Mp4Options { width: ancho, height: alto, fps, quality: 75 },
+            &Mp4Options { width: ancho, height: alto, fps, quality: 75, bitrate_override: None },
             None,
             |_, _, _| {},
         )
@@ -146,7 +146,7 @@ mod tests {
                 &retardos,
                 &mut cargar,
                 &ruta,
-                &Mp4Options { width: ancho, height: alto, fps: 30, quality: 75 },
+                &Mp4Options { width: ancho, height: alto, fps: 30, quality: 75, bitrate_override: None },
                 None,
                 |_, _, _| {},
             )));

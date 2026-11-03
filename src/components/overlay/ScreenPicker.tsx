@@ -12,9 +12,8 @@ interface Props {
 }
 
 const QUE_HACE: Record<CaptureMode, string> = {
-  still: "capturarla entera",
-  video: "grabarla entera",
-  gif: "grabarla entera en GIF",
+  still: "capture this screen",
+  video: "record this screen",
 };
 
 /**
@@ -45,10 +44,10 @@ export function ScreenPicker({ numero, total, modo, ancho, alto }: Props) {
               <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[11px] leading-none font-medium">
                 {numero}
               </kbd>
-              <span className="text-neutral-500">{t("o clic para")}</span>
+              <span className="text-neutral-500">{t("or click to")}</span>
             </>
           )}
-          {total === 1 && <span>{t("Clic para")}</span>}
+          {total === 1 && <span>{t("Click to")}</span>}
           <span>{QUE_HACE[modo]}</span>
           <span className="text-neutral-500 tabular-nums">
             {ancho} × {alto}
@@ -65,7 +64,7 @@ export function ScreenPicker({ numero, total, modo, ancho, alto }: Props) {
             <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[11px] leading-none font-medium text-neutral-200">
               0
             </kbd>
-            <span>para llevarte las {total} de una vez</span>
+            <span>to capture all {total} screens at once</span>
           </span>
         )}
       </div>

@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "winshotx",
-  "identifier": "com.munir.winshotx",
+  "productName": "WinShotX English",
+  "identifier": "com.bonejay.winshotx",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1421",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -13,10 +13,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "winshotx · ajustes",
+        "title": "WinShotX ? Settings",
         "url": "index.html",
-        "width": 840,
-        "height": 620,
+        "width": 980,
+        "height": 760,
         "resizable": true,
         "decorations": true,
         "transparent": false,
@@ -24,7 +24,7 @@
         "center": true,
         "visible": false,
         "skipTaskbar": false,
-        "minWidth": 780,
+        "minWidth": 840,
         "minHeight": 420,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling"
       }
@@ -34,26 +34,16 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$TEMP/winshotx/**",
-          "$APPDATA/winshotx/**"
+          "$TEMP/winshotx-english/**",
+          "$APPDATA/com.bonejay.winshotx/**"
         ]
       }
     }
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2QUQwMTlBQ0IwNTc4MjAKUldRZ2VBWExtZ0d0aGlLcjRxMWFvSzJBYU04UVhxWitZR2FUS2tnL1ViTTU5bGxCeW1WeElWSnkK",
-      "endpoints": [
-        "https://github.com/Mun1to/winshotx/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  },
+  "plugins": {},
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "targets": [
       "nsis"
     ],
@@ -67,7 +57,7 @@
         "installMode": "currentUser"
       }
     },
-    "shortDescription": "Captura y grabación de pantalla local",
-    "longDescription": "Captura de región, grabación a GIF y MP4 y editor de recorte, todo local y sin dependencias externas."
+    "shortDescription": "Local screenshots and on-demand video recording",
+    "longDescription": "English-only screen capture with configurable native and FFmpeg video encoding."
   }
 }

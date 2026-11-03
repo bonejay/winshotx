@@ -15,10 +15,7 @@ pub mod anotador;
 pub mod punteros;
 #[cfg(windows)]
 pub mod audio;
-#[cfg(test)]
-mod bench_anillo;
 mod bench_thumbs;
-pub mod buffer;
 pub mod delta;
 pub mod mezcla;
 pub mod pastilla;
@@ -441,7 +438,7 @@ impl<'a> LectorFotogramas<'a> {
                     let blob = self
                         .buffer
                         .get(desde..hasta)
-                        .ok_or_else(|| AppError::Msg("fotograma a trozos mas corto de lo que dice".into()))?;
+                        .ok_or_else(|| AppError::Msg("Incomplete frame data".into()))?;
                     let (_, pixels) = qoi::decode_to_vec(blob)?;
                     delta::aplicar(lienzo, *ancho, trozo.parche, &pixels);
                     desde = hasta;
@@ -488,7 +485,7 @@ impl<'a> LectorEnOrden<'a> {
     /// salta hacia atras o hacia delante, se reconstruye desde el entero como siempre.
     pub fn en(&mut self, index: usize) -> Result<RgbaImage> {
         if index >= self.session.frames.len() {
-            return Err(AppError::Msg(format!("fotograma {index} inexistente")));
+            return Err(AppError::Msg(format!("Frame {index} does not exist")));
         }
         let desde = match self.ultimo {
             // Hacia delante se sigue parcheando encima de lo que ya esta dibujado, y solo
@@ -515,7 +512,7 @@ impl<'a> LectorEnOrden<'a> {
         self.buffer = lector.buffer;
         self.ultimo = Some(index);
         RgbaImage::from_raw(self.ancho, self.alto, self.lienzo.clone())
-            .ok_or_else(|| AppError::Msg("fotograma corrupto en la caché".into()))
+            .ok_or_else(|| AppError::Msg("Corrupt frame in cache".into()))
     }
 }
 
@@ -589,13 +586,13 @@ impl LectorPorDelante {
         let recibir = self
             .recibir
             .as_ref()
-            .ok_or_else(|| AppError::Msg("el lector ya esta cerrado".into()))?;
+            .ok_or_else(|| AppError::Msg("The frame reader is closed".into()))?;
         let (leido, fotograma) = recibir
             .recv()
-            .map_err(|_| AppError::Msg("el lector se ha cerrado antes de tiempo".into()))??;
+            .map_err(|_| AppError::Msg("The frame reader closed unexpectedly".into()))??;
         if leido != index {
             return Err(AppError::Msg(format!(
-                "se pidio el fotograma {index} y el lector iba por el {leido}"
+                "Requested frame {index} but the reader is at frame {leido}"
             )));
         }
         Ok(fotograma)
@@ -615,11 +612,11 @@ impl Drop for LectorPorDelante {
 
 pub fn read_frame(session: &SessionData, index: usize) -> Result<RgbaImage> {
     if index >= session.frames.len() {
-        return Err(AppError::Msg(format!("fotograma {index} inexistente")));
+        return Err(AppError::Msg(format!("Frame {index} does not exist")));
     }
     let (ancho, alto, pixeles) = reconstruir(session, index)?;
     RgbaImage::from_raw(ancho, alto, pixeles)
-        .ok_or_else(|| AppError::Msg("fotograma corrupto en la caché".into()))
+        .ok_or_else(|| AppError::Msg("Corrupt frame in cache".into()))
 }
 
 /// Genera las miniaturas de la tira de tiempo. Se hace en paralelo porque es

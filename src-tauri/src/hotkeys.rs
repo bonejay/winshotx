@@ -174,30 +174,7 @@ pub fn register(app: &AppHandle, settings: &Settings) -> ShortcutStatus {
     }
 
     // La tecla de los ultimos segundos solo existe mientras el anillo esta encendido.
-    if settings.replay_enabled {
-        match settings.replay_shortcut.parse::<Shortcut>() {
-            Err(error) => eprintln!("atajo de los ultimos segundos invalido: {error}"),
-            Ok(shortcut) => {
-                let resultado = manager.on_shortcut(shortcut, |app, _shortcut, event| {
-                    if event.state() != ShortcutState::Pressed {
-                        return;
-                    }
-                    if let Err(error) = crate::replay::save(app) {
-                        eprintln!("no se han podido guardar los ultimos segundos: {error}");
-                    }
-                });
-                if let Err(error) = resultado {
-                    eprintln!(
-                        "el atajo de los ultimos segundos {} no se ha podido registrar: {error}",
-                        settings.replay_shortcut
-                    );
-                } else {
-                    status.replay = true;
-                    puestos.push(shortcut);
-                }
-            }
-        }
-    }
+
 
     // Win+Mayus+S solo se pide si se acepto pagar lo que cuesta, y va la ultima porque
     // antes hay que saber si el usuario ya la puso como atajo suyo.

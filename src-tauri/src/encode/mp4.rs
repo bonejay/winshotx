@@ -10,10 +10,14 @@ pub struct Mp4Options {
     pub fps: u32,
     /// 10..100; se traduce a bitrate en funcion de la resolucion y el ritmo.
     pub quality: u8,
+    pub bitrate_override: Option<u32>,
 }
 
 impl Mp4Options {
     pub fn bitrate(&self) -> u32 {
+        if let Some(value) = self.bitrate_override {
+            return value;
+        }
         let pixels_per_second = self.width as f32 * self.height as f32 * self.fps.max(1) as f32;
         let factor = 0.04 + (self.quality.clamp(10, 100) as f32 / 100.0) * 0.16;
         (pixels_per_second * factor).clamp(400_000.0, 60_000_000.0) as u32
@@ -122,7 +126,7 @@ where
     };
 
     if indices.is_empty() {
-        return Err(AppError::Msg("no hay fotogramas que exportar".into()));
+        return Err(AppError::Msg("There are no frames to export.".into()));
     }
     // Las dimensiones impares rompen a H.264, y las diminutas tambien (ver
     // `medida_que_acepta`): las dos cosas se arreglan aqui, antes de abrir nada.
@@ -275,6 +279,7 @@ mod tests {
             height: 720,
             fps: 30,
             quality: 20,
+            bitrate_override: None,
         };
         let alta = Mp4Options {
             quality: 100,

@@ -10,8 +10,7 @@ mod hotkeys;
 mod platform;
 pub mod record;
 mod recorder;
-mod replay;
-mod tray_menu;
+mod preview;
 mod settings;
 pub mod sensibles;
 mod state;
@@ -158,7 +157,7 @@ pub fn run() {
                 let _ = settings::save(&handle, &config);
             }
 
-            let temp_root = std::env::temp_dir().join("winshotx");
+            let temp_root = std::env::temp_dir().join("winshotx-english");
             std::fs::create_dir_all(temp_root.join("sessions"))?;
             purge_old_sessions(&temp_root);
             purge_pins(&temp_root);
@@ -202,11 +201,7 @@ pub fn run() {
             // El anillo de los ultimos segundos vuelve solo si se dejo encendido: es un
             // ajuste que se pone una vez y se espera encontrar puesto. Si no arranca, se
             // dice por consola y la app sigue: quedarse sin winshotx por esto seria peor.
-            if config.replay_enabled {
-                if let Err(error) = replay::start(&handle) {
-                    eprintln!("[replay] no se ha podido encender al arrancar: {error}");
-                }
-            }
+            // This edition never starts a background recorder.
             // No hay ninguna ventana visible esperando en este momento (la app arranca
             // en la bandeja), asi que crear las ventanas overlay ahora, ocultas, no lo
             // nota nadie: la primera captura del dia encuentra el pool ya listo.
@@ -279,8 +274,6 @@ pub fn run() {
             commands::shortcut_status,
             commands::list_screens,
             commands::show_screen_number,
-            commands::replay_status,
-            commands::replay_save,
             commands::print_screen_state,
             commands::use_print_screen,
             commands::use_win_shift_s,
@@ -290,9 +283,7 @@ pub fn run() {
             commands::open_windows_apps,
             commands::remove_snipping_tool,
             commands::quit_app,
-            commands::tray_menu_state,
             commands::tray_menu_action,
-            commands::resize_tray_menu,
         ])
         .build(tauri::generate_context!())
         .expect("no se ha podido construir la aplicacion")

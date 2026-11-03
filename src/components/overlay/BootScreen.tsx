@@ -44,7 +44,7 @@ export function BootScreen({ error }: { error: string | null }) {
           <div className="flex max-w-xl items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-950/60 px-4 py-3 text-sm text-red-200">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <span>
-              <span className="block font-medium">{t("No se ha podido preparar la captura")}</span>
+              <span className="block font-medium">{t("The capture could not be prepared")}</span>
               <span className="mt-1 block text-xs break-words text-red-300/90">{error}</span>
             </span>
           </div>
@@ -53,13 +53,13 @@ export function BootScreen({ error }: { error: string | null }) {
             onClick={() => void salir()}
             className="rounded-lg border border-white/15 px-4 py-1.5 text-xs text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
           >
-            {t("Cerrar (Esc)")}
+            {t("Close (Esc)")}
           </button>
         </>
       ) : (
         <>
           <span className="size-5 animate-spin rounded-full border-2 border-white/15 border-t-white/70" />
-          <span className="text-xs text-neutral-400">{t("Preparando la captura… · Esc para salir")}</span>
+          <span className="text-xs text-neutral-400">{t("Getting the capture ready… · Esc to leave")}</span>
         </>
       )}
     </div>

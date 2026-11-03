@@ -10,14 +10,12 @@ import type {
   OverlayPayload,
   Rect,
   RecordOptions,
-  ReplayStatus,
   Screen,
   SessionInfo,
   PrintScreenState,
   Settings,
   ShortcutStatus,
   TrayMenuAction,
-  TrayMenuState,
   StillAction,
   StillResult,
   StudioData,
@@ -195,10 +193,8 @@ export const showScreenNumber = (screen: number) =>
   invoke<void>("show_screen_number", { screen });
 
 /** Cómo va el anillo de los últimos segundos. */
-export const replayStatus = () => invoke<ReplayStatus>("replay_status");
 
 /** Quedarse con lo último que pasó. Lo mismo que hace la tecla. */
-export const replaySave = () => invoke<void>("replay_save");
 
 /** Le quita la tecla Impr Pant a la Herramienta de Recortes, o se la devuelve. */
 export const usePrintScreen = (enabled: boolean) =>
@@ -229,12 +225,9 @@ export const restartShell = () => invoke<ShortcutStatus>("restart_shell");
 export const quitApp = () => invoke<void>("quit_app");
 
 /** Lo que el menú de la bandeja necesita para pintarse: versión, atajos y qué corre. */
-export const trayMenuState = () => invoke<TrayMenuState>("tray_menu_state");
 
 /** Una entrada del menú, pulsada. Rust esconde el menú y hace lo que toque. */
 export const trayMenuAction = (action: TrayMenuAction) =>
   invoke<void>("tray_menu_action", { action });
 
 /** El alto que ha medido el menú, para que su ventana se ajuste al contenido. */
-export const resizeTrayMenu = (height: number) =>
-  invoke<void>("resize_tray_menu", { height });

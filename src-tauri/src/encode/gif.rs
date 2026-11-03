@@ -106,7 +106,7 @@ where
     P: FnMut(&str, usize, usize),
 {
     if indices.is_empty() {
-        return Err(AppError::Msg("no hay fotogramas que exportar".into()));
+        return Err(AppError::Msg("There are no frames to export.".into()));
     }
     let width = options.width.max(1);
     let height = options.height.max(1);

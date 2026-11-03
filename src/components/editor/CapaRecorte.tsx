@@ -72,7 +72,7 @@ export function CapaRecorte({ activa, recorte, onRecorte }: Props) {
       viewBox="0 0 1000 1000"
       preserveAspectRatio="none"
       role="figure"
-      aria-label={t("Lo que se va a exportar")}
+      aria-label={t("What is going to be exported")}
       className={`absolute inset-0 size-full ${
         activa ? "cursor-crosshair" : "pointer-events-none"
       }`}

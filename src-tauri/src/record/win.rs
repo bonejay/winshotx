@@ -22,7 +22,7 @@ pub(crate) fn monitor_at(x: i32, y: i32) -> Result<WcMonitor> {
 
     let handle = unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) };
     if handle.is_invalid() {
-        return Err(AppError::Msg("no hay monitor en esa posición".into()));
+        return Err(AppError::Msg("No display at this position".into()));
     }
     Ok(WcMonitor::from_raw_hmonitor(handle.0))
 }
@@ -244,7 +244,7 @@ pub fn start_window(
         )
     };
     if medida.is_err() {
-        return Err(AppError::Msg("esa ventana ya no está".into()));
+        return Err(AppError::Msg("The selected window no longer exists".into()));
     }
     let ancho = (marco.right - marco.left).max(1) as u32;
     let alto = (marco.bottom - marco.top).max(1) as u32;

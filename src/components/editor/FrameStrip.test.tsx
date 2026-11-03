@@ -49,7 +49,7 @@ describe("la cabecera de la tira", () => {
   it("dice por que fotograma va, con el numero que ve una persona", () => {
     pintar({ currentIndex: 2 });
     // Tercero de la lista, pero para quien mira es el 3 de 10.
-    expect(screen.getByText(/Fotograma 3 de 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Frame 3 of 10/)).toBeInTheDocument();
   });
 
   it("en ingles no se queda ni una palabra en espannol", () => {
@@ -63,7 +63,7 @@ describe("la cabecera de la tira", () => {
 
   it("dice «1 fotograma» en singular cuando solo queda uno", () => {
     pintar({ inIndex: 4, outIndex: 4 });
-    expect(screen.getByText(/1 fotograma\b/)).toBeInTheDocument();
+    expect(screen.getByText(/1 frame\b/)).toBeInTheDocument();
     expect(screen.queryByText(/1 fotogramas/)).toBeNull();
   });
 
@@ -89,26 +89,26 @@ describe("los marcadores del recorte", () => {
     // redondear hacia abajo lo movia uno a la derecha y ese fotograma de mas se colaba
     // en la exportacion.
     const { onChangeOut } = pintar({ inIndex: 0, outIndex: 5 });
-    fireEvent.pointerDown(screen.getByTitle("Final del trozo (tecla O)"));
+    fireEvent.pointerDown(screen.getByTitle("End of the clip (key O)"));
     fireEvent.pointerMove(window, { clientX: (5 + 1) * ANCHO });
     expect(onChangeOut).toHaveBeenLastCalledWith(5);
   });
 
   it("el marcador A se queda en el fotograma sobre el que se suelta", () => {
     const { onChangeIn } = pintar();
-    fireEvent.pointerDown(screen.getByTitle("Inicio del trozo (tecla I)"));
+    fireEvent.pointerDown(screen.getByTitle("Start of the clip (key I)"));
     fireEvent.pointerMove(window, { clientX: 3 * ANCHO + 10 });
     expect(onChangeIn).toHaveBeenLastCalledWith(3);
   });
 
   it("ninguno de los dos se sale de la tira por mucho que se arrastre", () => {
     const { onChangeIn, onChangeOut } = pintar();
-    fireEvent.pointerDown(screen.getByTitle("Inicio del trozo (tecla I)"));
+    fireEvent.pointerDown(screen.getByTitle("Start of the clip (key I)"));
     fireEvent.pointerMove(window, { clientX: -5000 });
     expect(onChangeIn).toHaveBeenLastCalledWith(0);
 
     fireEvent.pointerUp(window);
-    fireEvent.pointerDown(screen.getByTitle("Final del trozo (tecla O)"));
+    fireEvent.pointerDown(screen.getByTitle("End of the clip (key O)"));
     fireEvent.pointerMove(window, { clientX: 5000 });
     expect(onChangeOut).toHaveBeenLastCalledWith(9);
   });

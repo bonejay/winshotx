@@ -25,6 +25,8 @@ pub struct ExportRequest {
     pub height: u32,
     pub fps: u32,
     pub quality: u8,
+    #[serde(default)]
+    pub bitrate_override: Option<u32>,
     /// Si el video exportado lleva el sonido que se grabo. Lo decide el interruptor del
     /// editor, y solo tiene efecto si la grabacion llego a capturar audio.
     pub audio: bool,
@@ -232,13 +234,21 @@ fn load_session(app: &AppHandle, id: &str) -> Result<SessionData> {
     Ok(session)
 }
 
-pub fn export(app: &AppHandle, request: ExportRequest) -> Result<ExportResult> {
+pub fn export(app: &AppHandle, mut request: ExportRequest) -> Result<ExportResult> {
     let started = Instant::now();
+    let encoding = app.state::<AppState>().settings.read().encoding.clone();
+    if request.format == "mp4" {
+        request.engine = encoding.engine.clone();
+        request.bitrate_override = encoding.bitrate();
+        if request.engine == "ffmpeg" && !ffmpeg::available() {
+            return Err(AppError::Msg("FFmpeg was not found on PATH. Install FFmpeg and restart WinShotX.".into()));
+        }
+    }
     let session = load_session(app, &request.session_id)?;
     // Sin fotogramas no hay nada que exportar, y los caminos de abajo lo dan por hecho.
     // Un error aqui se lee; un panic a mitad de exportar deja la ventana esperando.
     if session.frames.is_empty() {
-        return Err(AppError::Msg("esa grabación no tiene ningún fotograma".into()));
+        return Err(AppError::Msg("This recording has no frames".into()));
     }
     let width = request.width.max(1);
     let height = request.height.max(1);
@@ -374,25 +384,30 @@ pub fn export(app: &AppHandle, request: ExportRequest) -> Result<ExportResult> {
                 request.velocidad(),
             );
             let path = destination_path(app, &request, "mp4")?;
-            if request.engine == "ffmpeg" && ffmpeg::available() {
+            if request.engine == "ffmpeg" {
                 let temporary = session.dir.join("export-source.mp4");
-                encode_mp4(&session, &indices, &delays, &temporary, &request, &emit)?;
+                let mut intermediate = request.clone();
+                intermediate.quality = 100;
+                intermediate.bitrate_override = None;
+                encode_mp4(&session, &indices, &delays, &temporary, &intermediate, &emit)?;
                 emit("encoding", 0, 1);
-                ffmpeg::mp4_from_video(
+                let encoded = ffmpeg::mp4_from_video(
                     &temporary,
                     &path,
                     request.fps,
                     ancho_final,
                     alto_final,
                     request.quality,
-                )?;
+                    &encoding,
+                );
                 let _ = std::fs::remove_file(&temporary);
+                encoded?;
             } else {
                 encode_mp4(&session, &indices, &delays, &path, &request, &emit)?;
             }
             path
         }
-        other => return Err(AppError::Msg(format!("formato desconocido: {other}"))),
+        other => return Err(AppError::Msg(format!("Unknown format: {other}"))),
     };
 
     emit("done", 1, 1);
@@ -773,7 +788,7 @@ where
             height: alto_final,
             fps: request.fps.max(1),
             quality: request.quality,
-        },
+         bitrate_override: request.bitrate_override },
         // El interruptor del editor manda: alguien puede querer el vídeo mudo. Y a
         // velocidad distinta de la real no hay sonido que valga: acelerar la pista sin
         // tocar el tono es otro problema entero, y dejarla tal cual la despegaria de la
@@ -1211,7 +1226,7 @@ mod el_orden_de_exportar {
             speed: 1.0,
             destination: None,
             copy_to_clipboard: true,
-        }
+         bitrate_override: None }
     }
 
     fn sin_marco() -> marco::Marco {
@@ -1526,7 +1541,7 @@ mod la_camara_del_exportador {
             speed: 1.0,
             destination: None,
             copy_to_clipboard: false,
-        }
+         bitrate_override: None }
     }
 
     /// Una velocidad que no es un numero, o que es cero, no puede dejar la exportacion
@@ -1746,7 +1761,7 @@ mod medir {
         let indices: Vec<usize> = (0..cuantos).collect();
         let delays = vec![33u32; cuantos];
         let marco = marco::Marco { margen: 0, fondo: marco::Fondo::desde("blanco"), sombra: false };
-        let opciones = mp4::Mp4Options { width: ancho, height: alto, fps: 30, quality: 75 };
+        let opciones = mp4::Mp4Options { width: ancho, height: alto, fps: 30, quality: 75, bitrate_override: None };
 
         let vestir = |imagen: image::RgbaImage| enmarcar_y_anotar(imagen, ancho, alto, marco, &[], &[], None);
 
@@ -1847,7 +1862,7 @@ mod medir {
                 height: alto,
                 fps: 30,
                 quality: 80,
-            },
+             bitrate_override: None },
             None,
             |_, _, _| {},
         )
@@ -1937,7 +1952,7 @@ mod medir {
                 height: nativo.1,
                 fps: 30,
                 quality: 80,
-            },
+             bitrate_override: None },
             None,
             |_, _, _| {},
         )
@@ -1965,7 +1980,7 @@ mod medir {
                 height: alto,
                 fps: 30,
                 quality: 80,
-            },
+             bitrate_override: None },
             None,
             |_, _, _| {},
         )

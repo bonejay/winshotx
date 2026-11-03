@@ -68,7 +68,7 @@ describe("como se cierra", () => {
 
   it("con el boton de la esquina", () => {
     render(<PinWindow imagen={RUTA} />);
-    fireEvent.click(screen.getByLabelText(/^Cerrar/));
+    fireEvent.click(screen.getByLabelText(/^Close/));
     expect(cerrar).toHaveBeenCalled();
   });
 
@@ -88,21 +88,21 @@ describe("como se cierra", () => {
 describe("copiar lo que hay anclado", () => {
   it("el boton manda la ruta a Rust", async () => {
     render(<PinWindow imagen={RUTA} />);
-    fireEvent.click(screen.getByLabelText(/^Copiar ·/));
-    await screen.findByText("Copiada");
+    fireEvent.click(screen.getByLabelText(/^Copy ·/));
+    await screen.findByText("Copied");
     expect(llamadas).toContainEqual({ comando: "copy_pinned", args: { path: RUTA } });
   });
 
   it("Ctrl+C hace lo mismo sin ir al raton", async () => {
     render(<PinWindow imagen={RUTA} />);
     fireEvent.keyDown(window, { key: "c", ctrlKey: true });
-    await screen.findByText("Copiada");
+    await screen.findByText("Copied");
     expect(llamadas.some((l) => l.comando === "copy_pinned")).toBe(true);
   });
 
   it("el aviso de copiada no sale hasta que se copia", () => {
     render(<PinWindow imagen={RUTA} />);
-    expect(screen.queryByText("Copiada")).toBeNull();
+    expect(screen.queryByText("Copied")).toBeNull();
   });
 
   it("en ingles los botones hablan ingles", () => {
@@ -111,7 +111,6 @@ describe("copiar lo que hay anclado", () => {
     expect(screen.getByLabelText(/^Copy ·/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Save ·/)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Close ·/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/^Copiar ·/)).toBeNull();
   });
 });
 
@@ -120,15 +119,15 @@ describe("guardar la que estaba anclada", () => {
   // ancla algo y luego decide que lo quiere tiene que copiarlo y pegarlo en otro programa.
   it("el boton la manda a la carpeta de capturas", async () => {
     render(<PinWindow imagen={RUTA} />);
-    fireEvent.click(screen.getByLabelText(/^Guardar ·/));
-    await screen.findByText("Guardada");
+    fireEvent.click(screen.getByLabelText(/^Save ·/));
+    await screen.findByText("Saved");
     expect(llamadas).toContainEqual({ comando: "save_pinned", args: { path: RUTA } });
   });
 
   it("Ctrl+S hace lo mismo", async () => {
     render(<PinWindow imagen={RUTA} />);
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
-    await screen.findByText("Guardada");
+    await screen.findByText("Saved");
     expect(llamadas.some((l) => l.comando === "save_pinned")).toBe(true);
   });
 
@@ -150,7 +149,7 @@ describe("leer el texto de la anclada", () => {
   it("la tecla T lo copia, como en la barra de captura", async () => {
     render(<PinWindow imagen={RUTA} />);
     fireEvent.keyDown(window, { key: "t" });
-    await screen.findByText("Texto copiado");
+    await screen.findByText("Text copied");
     expect(llamadas).toContainEqual({ comando: "pinned_text", args: { path: RUTA } });
   });
 
@@ -163,17 +162,17 @@ describe("leer el texto de la anclada", () => {
 
 describe("cuando algo sale mal", () => {
   it("se ensenna el motivo, y en rojo", async () => {
-    falla("pinned_text", "No he encontrado texto en esa captura.");
+    falla("pinned_text", "I found no text in that shot.");
     render(<PinWindow imagen={RUTA} />);
     fireEvent.keyDown(window, { key: "t" });
     const aviso = await screen.findByRole("status");
-    expect(aviso).toHaveTextContent("No he encontrado texto en esa captura.");
+    expect(aviso).toHaveTextContent("I found no text in that shot.");
     expect(aviso.className).toContain("bg-red-500/90");
   });
 
   it("y traducido, porque el mensaje de Rust es la clave", async () => {
     aplicarIdioma("en");
-    falla("pinned_text", "No he encontrado texto en esa captura.");
+    falla("pinned_text", "I found no text in that shot.");
     render(<PinWindow imagen={RUTA} />);
     fireEvent.keyDown(window, { key: "t" });
     const aviso = await screen.findByRole("status");
@@ -183,7 +182,7 @@ describe("cuando algo sale mal", () => {
   it("un fallo al guardar no se traga en silencio", async () => {
     falla("save_pinned", "No he podido escribir en esa carpeta.");
     render(<PinWindow imagen={RUTA} />);
-    fireEvent.click(screen.getByLabelText(/^Guardar ·/));
+    fireEvent.click(screen.getByLabelText(/^Save ·/));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "No he podido escribir en esa carpeta.",
     );

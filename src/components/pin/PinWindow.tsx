@@ -42,9 +42,9 @@ export function PinWindow({ imagen }: { imagen: string }) {
     }
   };
 
-  const copiar = () => hacer(() => copyPinned(imagen), "Copiada");
-  const guardar = () => hacer(() => savePinned(imagen), "Guardada");
-  const leer = () => hacer(() => pinnedText(imagen), "Texto copiado");
+  const copiar = () => hacer(() => copyPinned(imagen), "Copied");
+  const guardar = () => hacer(() => savePinned(imagen), "Saved");
+  const leer = () => hacer(() => pinnedText(imagen), "Text copied");
 
   useEffect(() => {
     if (!aviso) return;
@@ -80,7 +80,7 @@ export function PinWindow({ imagen }: { imagen: string }) {
       onPointerEnter={() => setEncima(true)}
       onPointerLeave={() => setEncima(false)}
       onDoubleClick={cerrar}
-      title={t("Arrastra para moverla · Esc para cerrarla")}
+      title={t("Drag to move it · Esc to close it")}
       className="relative h-full w-full cursor-grab overflow-hidden bg-black active:cursor-grabbing"
     >
       <img
@@ -96,14 +96,14 @@ export function PinWindow({ imagen }: { imagen: string }) {
           encima ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <Boton icono={Copy} etiqueta={`${t("Copiar")} · Ctrl+C`} onClick={() => void copiar()} />
+        <Boton icono={Copy} etiqueta={`${t("Copy")} · Ctrl+C`} onClick={() => void copiar()} />
         <Boton
           icono={Download}
-          etiqueta={`${t("Guardar")} · Ctrl+S`}
+          etiqueta={`${t("Save")} · Ctrl+S`}
           onClick={() => void guardar()}
         />
-        <Boton icono={Type} etiqueta={`${t("Copiar el texto")} · T`} onClick={() => void leer()} />
-        <Boton icono={X} etiqueta={`${t("Cerrar")} · Esc`} onClick={cerrar} peligro />
+        <Boton icono={Type} etiqueta={`${t("Copy the text")} · T`} onClick={() => void leer()} />
+        <Boton icono={X} etiqueta={`${t("Close")} · Esc`} onClick={cerrar} peligro />
       </div>
 
       {aviso && (

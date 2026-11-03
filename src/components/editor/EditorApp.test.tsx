@@ -46,7 +46,7 @@ function preparar(region = VERTICAL, mp4Path: string | null = null, format = "st
 async function abrir(region = VERTICAL) {
   preparar(region);
   const vista = render(<EditorApp sessionId="s1" />);
-  await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
   return vista;
 }
 
@@ -54,7 +54,7 @@ async function abrir(region = VERTICAL) {
 async function abrirRescatada() {
   preparar(VERTICAL, null, "mp4");
   const vista = render(<EditorApp sessionId="s1" />);
-  await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
   return vista;
 }
 
@@ -110,7 +110,7 @@ describe("recortar la imagen", () => {
     const { container } = await abrir();
     fireEvent.keyDown(window, { key: "2" });
     fireEvent.keyDown(window, { key: "c" });
-    expect(container.querySelector('[aria-label^="Rectángulo"]')?.getAttribute("aria-pressed")).toBe(
+    expect(container.querySelector('[aria-label^="Box"]')?.getAttribute("aria-pressed")).toBe(
       "false",
     );
   });
@@ -155,7 +155,7 @@ describe("la vista previa del estudio", () => {
     preparar(VERTICAL, "C:\\s\\preview.mp4", "video");
     responde("session_studio", { clics: [], teclas: [], cursor: [[0, 10, 10]] });
     const vista = render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
     expect(vista.container.querySelector("[data-capa-estudio]")).not.toBeNull();
     // Y se pidió lo anotado al grabar, que es de donde sale todo.
     expect(llamadas.some((l) => l.comando === "session_studio")).toBe(true);
@@ -164,7 +164,7 @@ describe("la vista previa del estudio", () => {
   it("cuando Rust avisa de que las miniaturas ya están, se vuelven a pedir los fotogramas", async () => {
     preparar(VERTICAL, "C:\\s\\preview.mp4", "video");
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
     const antes = llamadas.filter((l) => l.comando === "session_frames").length;
     emite("winshotx://session-thumbs", "s1");
     await waitFor(() =>
@@ -196,9 +196,9 @@ describe("la vista previa del estudio", () => {
       mp4Path: "C:\\s\\preview.mp4",
     });
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
     expect(llamadas.some((l) => l.comando === "session_camera")).toBe(false);
-    fireEvent.change(screen.getByLabelText("Acercarse a los clics"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Zoom in on clicks"), { target: { value: "2" } });
     await waitFor(() => expect(llamadas.some((l) => l.comando === "session_camera")).toBe(true));
     const peticion = llamadas.find((l) => l.comando === "session_camera")?.args as { zoom: number };
     expect(peticion.zoom).toBe(2);
@@ -219,14 +219,14 @@ describe("el botón de reproducir", () => {
   it("y con el vídeo escrito, se puede pulsar", async () => {
     preparar(VERTICAL, "C:\\t\\preview.mp4", "mp4");
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
     expect(play()).toBeEnabled();
   });
 
   it("mientras no está, se dice que está en camino", async () => {
     // Esta frase es toda la diferencia entre «espera unos segundos» y «esto no funciona».
     await abrirRescatada();
-    expect(screen.getByText("Preparando el vídeo…")).toBeInTheDocument();
+    expect(screen.getByText("Getting the video ready…")).toBeInTheDocument();
   });
 
   it("cuando avisan de que ya está, se enciende solo", async () => {
@@ -246,28 +246,28 @@ describe("el botón de reproducir", () => {
     emite("winshotx://session-preview", { sessionId: "s1", porCiento: 100, listo: true, fallida: false });
 
     await waitFor(() => expect(play()).toBeEnabled());
-    expect(screen.queryByText("Preparando el vídeo…")).toBeNull();
+    expect(screen.queryByText("Getting the video ready…")).toBeNull();
   });
 
   it("el aviso de otra sesión no lo toca", async () => {
     await abrirRescatada();
     emite("winshotx://session-preview", { sessionId: "otra", porCiento: 100, listo: true, fallida: false });
     expect(hayPlay()).toBeNull();
-    expect(screen.getByText("Preparando el vídeo…")).toBeInTheDocument();
+    expect(screen.getByText("Getting the video ready…")).toBeInTheDocument();
   });
 
   it("y si la vista previa no sale, lo dice en vez de esperar para siempre", async () => {
     await abrirRescatada();
     emite("winshotx://session-preview", { sessionId: "s1", porCiento: 0, listo: false, fallida: true });
-    await waitFor(() => expect(screen.getByText("Sin vista previa")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("No preview")).toBeInTheDocument());
     // Y se dice lo que SÍ se puede hacer, que recortar y exportar siguen funcionando.
-    expect(screen.getByTitle(/recortar y exportar igual/)).toBeInTheDocument();
+    expect(screen.getByTitle(/crop it and export it/)).toBeInTheDocument();
   });
 
   it("y mientras se escribe, dice por dónde va", async () => {
     await abrirRescatada();
     emite("winshotx://session-preview", { sessionId: "s1", porCiento: 45, listo: false, fallida: false });
-    await waitFor(() => expect(screen.getByText("Preparando el vídeo… 45%")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Getting the video ready… 45%")).toBeInTheDocument());
     expect(hayPlay()).toBeNull();
   });
 
@@ -276,7 +276,7 @@ describe("el botón de reproducir", () => {
     // marcar. Cuatro botones apagados que hay que leer para descartarlos son peor que
     // ninguno.
     await abrir();
-    expect(screen.queryByText("Preparando el vídeo…")).toBeNull();
+    expect(screen.queryByText("Getting the video ready…")).toBeNull();
     expect(hayPlay()).toBeNull();
     expect(screen.queryByRole("button", { name: /Inicio|Start/ })).toBeNull();
     // Lo que sí sigue estando en una captura es el recorte.
@@ -320,7 +320,7 @@ describe("el botón de reproducir", () => {
     const suena = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue();
     preparar(VERTICAL, "C:\\t\\preview.mp4", "mp4");
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
 
     fireEvent.click(play());
     expect(suena).toHaveBeenCalled();
@@ -333,7 +333,7 @@ describe("el botón de reproducir", () => {
       .mockRejectedValue("NotAllowedError");
     preparar(VERTICAL, "C:\\t\\preview.mp4", "mp4");
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
 
     fireEvent.click(play());
     await waitFor(() => expect(screen.getByText(/NotAllowedError/)).toBeInTheDocument());
@@ -344,7 +344,7 @@ describe("el botón de reproducir", () => {
     // Un reloj suelto no distingue el principio de algo largo del final de algo corto.
     preparar(VERTICAL, "C:\\t\\preview.mp4", "mp4");
     render(<EditorApp sessionId="s1" />);
-    await waitFor(() => expect(screen.queryByText("Preparando la sesión…")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Getting the session ready…")).toBeNull());
     // La tira de abajo también escribe la hora del fotograma, así que se mira el
     // reloj de los mandos entre todos los que la llevan.
     const relojes = screen

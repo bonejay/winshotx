@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Clipboard, Cpu, FolderDown, FolderOpen, Link2, Save, Sparkles, Unlink2, Zap } from "lucide-react";
-import { exportMedia, pickDirectory, pickSaveFile, revealInExplorer } from "../../lib/ipc";
+import { exportMedia, getSettings, pickDirectory, pickSaveFile, revealInExplorer } from "../../lib/ipc";
 import { formatBytes } from "../../lib/format";
 import {
   EVENTS,
@@ -33,18 +33,17 @@ import { punteroNormal, type Estudio } from "../../lib/estudio";
  * cierre el panel sin exportar nada.
  */
 const FONDOS: { id: Background; label: string; muestra: string }[] = [
-  { id: "blanco", label: "Blanco", muestra: "#ffffff" },
-  { id: "negro", label: "Negro", muestra: "#121214" },
-  { id: "gris", label: "Gris", muestra: "#e8e8ea" },
-  { id: "atardecer", label: "Atardecer", muestra: "linear-gradient(135deg,#5874f5,#a855d9)" },
-  { id: "menta", label: "Menta", muestra: "linear-gradient(135deg,#22c598,#3884e8)" },
+  { id: "blanco", label: "White", muestra: "#ffffff" },
+  { id: "negro", label: "Black", muestra: "#121214" },
+  { id: "gris", label: "Grey", muestra: "#e8e8ea" },
+  { id: "atardecer", label: "Sunset", muestra: "linear-gradient(135deg,#5874f5,#a855d9)" },
+  { id: "menta", label: "Mint", muestra: "linear-gradient(135deg,#22c598,#3884e8)" },
 ];
 
 const FORMATS: { id: ExportFormat; label: string; hint: string }[] = [
-  { id: "gif", label: "GIF", hint: "bucle, sin audio" },
-  { id: "mp4", label: "MP4", hint: "H.264 por hardware" },
-  { id: "png", label: "PNG", hint: "el fotograma actual, sin perder nada" },
-  { id: "jpg", label: "JPG", hint: "el fotograma actual, mucho más ligero" },
+  { id: "mp4", label: "MP4", hint: "H.264 on the graphics card" },
+  { id: "png", label: "PNG", hint: "the frame you are on, losing nothing" },
+  { id: "jpg", label: "JPG", hint: "the frame you are on, far lighter" },
 ];
 
 /**
@@ -96,14 +95,14 @@ export function ExportPanel({
 }: Props) {
   const t = useT();
   const [format, setFormat] = useState<ExportFormat>(() => {
-    if (session.format === "gif") return "gif";
+
     // Una sesion de un solo fotograma es una imagen: exportarla a MP4 no tiene sentido.
     if (session.format === "still" || session.frameCount <= 1) return "png";
     return "mp4";
   });
   const [useFfmpeg, setUseFfmpeg] = useState(false);
   const [quality, setQuality] = useState(80);
-  const [fps, setFps] = useState(Math.min(session.fps, 30));
+  const [fps, setFps] = useState(session.fps);
   const [width, setWidth] = useState(session.region.width);
   const [height, setHeight] = useState(session.region.height);
   const [locked, setLocked] = useState(true);
@@ -141,11 +140,19 @@ export function ExportPanel({
   const [margen, setMargen] = useState(0);
   const [fondo, setFondo] = useState<Background>("blanco");
   const [sombra, setSombra] = useState(true);
-  const [loop, setLoop] = useState(true);
+  const loop = false;
   const [directory, setDirectory] = useState(saveDirectory);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [result, setResult] = useState<ExportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getSettings().then(settings => {
+      if (!settings?.encoding) return;
+      setUseFfmpeg(settings.encoding.engine === "ffmpeg");
+      setQuality(settings.encoding.quality);
+    }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     onEstudio?.({ zoom, cursor, aros, teclas });
@@ -300,7 +307,7 @@ export function ExportPanel({
       <div className="relative min-h-0 flex-1">
       <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
       <div>
-        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Formato")}</span>
+        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Format")}</span>
         <div className="grid grid-cols-4 gap-1 rounded-lg bg-black/40 p-1">
           {FORMATS.map((f) => (
             <button
@@ -322,7 +329,7 @@ export function ExportPanel({
 
       {format !== "png" && (
         <Slider
-          label={t("Calidad")}
+          label={t("Quality")}
           hint={`${quality}%`}
           min={10}
           max={100}
@@ -334,7 +341,7 @@ export function ExportPanel({
       {/* Una foto no tiene fotogramas por segundo. */}
       {!esUnaFoto(format) && (
         <Slider
-          label={t("Fotogramas por segundo")}
+          label={t("Frames per second")}
           hint={`${fps} fps`}
           min={5}
           max={fpsMax}
@@ -347,7 +354,7 @@ export function ExportPanel({
       {!esUnaFoto(format) && (
         <div>
           <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
-            {t("Velocidad")}
+            {t("Speed")}
           </span>
           <div className="flex gap-1">
             {VELOCIDADES.map((v) => (
@@ -369,15 +376,15 @@ export function ExportPanel({
           {velocidad !== 1 && (
             <p className="mt-1.5 text-[11px] text-neutral-400">
               {velocidad > 1
-                ? t("dura {n} veces menos, y sale sin sonido", { n: velocidad })
-                : t("dura el doble, y sale sin sonido")}
+                ? t("{n} times shorter, and it comes out silent", { n: velocidad })
+                : t("twice as long, and it comes out silent")}
             </p>
           )}
         </div>
       )}
 
       <div>
-        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Dimensiones")}</span>
+        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Size")}</span>
         {/*
           La proporción, de un clic.
 
@@ -388,7 +395,7 @@ export function ExportPanel({
         */}
         {onRecorte && (
           <>
-          <span className="mb-1.5 block text-[11px] text-neutral-500">{t("Proporción")}</span>
+          <span className="mb-1.5 block text-[11px] text-neutral-500">{t("Aspect ratio")}</span>
           <div className="mb-2.5 flex gap-1">
             {PROPORCIONES.map((p) => {
               const puesta =
@@ -418,8 +425,8 @@ export function ExportPanel({
               type="button"
               onClick={() => onRecorte(null)}
               disabled={recorte === null}
-              title={t("Quitar el recorte")}
-              aria-label={t("Quitar el recorte")}
+              title={t("Remove the crop")}
+              aria-label={t("Remove the crop")}
               className="rounded-lg px-2 py-1.5 text-[11px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
             >
               ×
@@ -428,18 +435,18 @@ export function ExportPanel({
           </>
         )}
         <div className="flex items-end gap-2">
-          <NumberField label={t("Ancho")} value={width} onChange={setW} suffix="px" />
+          <NumberField label={t("Width")} value={width} onChange={setW} suffix="px" />
           <button
             type="button"
             onClick={() => setLocked((l) => !l)}
-            title={locked ? t("Proporción bloqueada") : t("Proporción libre")}
+            title={locked ? t("Proportions locked") : t("Proportions free")}
             className={`mb-1.5 flex size-8 shrink-0 items-center justify-center rounded-md transition-colors ${
               locked ? "bg-white/10 text-blue-400" : "text-neutral-500 hover:text-white"
             }`}
           >
             {locked ? <Link2 className="size-4" /> : <Unlink2 className="size-4" />}
           </button>
-          <NumberField label={t("Alto")} value={height} onChange={setH} suffix="px" />
+          <NumberField label={t("Height")} value={height} onChange={setH} suffix="px" />
         </div>
         <div className="mt-1.5 flex gap-1">
           {[100, 75, 50].map((pct) => (
@@ -467,15 +474,15 @@ export function ExportPanel({
       {!esUnaFoto(format) && (
         <div className="space-y-2 border-t border-white/8 pt-3">
           <span className="block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
-            {t("Lo que se dibuja encima")}
+            {t("Drawn on top")}
           </span>
           <Slider
-            label={t("Puntero dibujado")}
+            label={t("Drawn pointer")}
             hint={
               cursor === 0
                 ? session.cursorBaked
-                  ? t("el de Windows")
-                  : t("sin puntero")
+                  ? t("the one Windows uses")
+                  : t("no pointer")
                 : `${cursor} px`
             }
             min={0}
@@ -491,45 +498,45 @@ export function ExportPanel({
               }`}
             >
               {session.cursorBaked
-                ? t("Esta grabación ya lleva el cursor de Windows dentro: vas a ver dos.")
-                : t("Es la flecha estándar, no la que tengas puesta.")}
+                ? t("This recording already has the Windows cursor baked in: you will see two.")
+                : t("It is the standard arrow, not the one you have set.")}
             </p>
           )}
           {session.hasClicks && (
             <>
               <Slider
-                label={t("Acercarse a los clics")}
-                hint={zoom <= 1.05 ? t("sin zoom") : `${zoom.toFixed(1)}×`}
+                label={t("Zoom in on clicks")}
+                hint={zoom <= 1.05 ? t("no zoom") : `${zoom.toFixed(1)}×`}
                 min={1}
                 max={3}
                 step={0.1}
                 value={zoom}
                 onChange={setZoom}
               />
-              <Toggle checked={aros} onChange={setAros} label={t("Marcar los clics")} />
+              <Toggle checked={aros} onChange={setAros} label={t("Mark the clicks")} />
             </>
           )}
           <Toggle
             checked={teclas}
             onChange={setTeclas}
-            label={t("Enseñar los atajos")}
+            label={t("Show the shortcuts")}
             // Este aviso viaja con el interruptor: es la regla que impide que una
             // contraseña tecleada mientras se grababa acabe dentro del vídeo.
-            hint={t("solo con Ctrl, Alt o Win: lo que escribes no sale")}
+            hint={t("only Ctrl, Alt or Win: typing never shows")}
           />
           <p className="text-[11px] leading-snug text-neutral-500">
-            {t("La vista previa ya enseña todo esto: lo que ves es lo que sale.")}
+            {t("The preview already shows all of this: what you see is what you get.")}
           </p>
         </div>
       )}
 
       <div className="border-t border-white/8 pt-3">
         <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
-          {t("El marco de alrededor")}
+          {t("The frame around it")}
         </span>
         <Slider
-          label={t("Aire alrededor")}
-          hint={margen === 0 ? t("sin marco") : `${margen} px`}
+          label={t("Padding")}
+          hint={margen === 0 ? t("no frame") : `${margen} px`}
           min={0}
           max={160}
           value={margen}
@@ -556,7 +563,7 @@ export function ExportPanel({
               ))}
             </div>
             <div className="mt-1.5">
-              <Toggle checked={sombra} onChange={setSombra} label={t("Sombra")} />
+              <Toggle checked={sombra} onChange={setSombra} label={t("Shadow")} />
             </div>
           </>
         )}
@@ -565,31 +572,23 @@ export function ExportPanel({
       {(format === "mp4" || format === "gif" || (hasFfmpeg && !esUnaFoto(format))) && (
       <div className="space-y-0.5 border-t border-white/8 pt-3">
         <span className="mb-1.5 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
-          {t("El archivo")}
+          {t("The file")}
         </span>
         {format === "mp4" && (
           <Toggle
             checked={audio}
             onChange={setAudio}
-            label={t("Audio del sistema")}
+            label={t("System audio")}
             hint={
               !session.hasAudio
-                ? t("esta grabación se hizo sin audio")
+                ? t("this recording was made without sound")
                 : velocidad !== 1
-                  ? t("a otra velocidad el vídeo sale mudo")
+                  ? t("at any other speed the video comes out silent")
                   : undefined
             }
           />
         )}
-        {format === "gif" && <Toggle checked={loop} onChange={setLoop} label={t("Bucle infinito")} />}
-        {hasFfmpeg && !esUnaFoto(format) && (
-          <Toggle
-            checked={useFfmpeg}
-            onChange={setUseFfmpeg}
-            label={t("Motor FFmpeg")}
-            hint={t("calidad máxima, más lento")}
-          />
-        )}
+        {format === "mp4" && <p className="px-1 py-2 text-[11px] text-neutral-400">Encoder preferences are set in Settings → Recording.</p>}
       </div>
       )}
 
@@ -602,23 +601,23 @@ export function ExportPanel({
         <button
           type="button"
           onClick={() => void pickDirectory().then((dir) => dir && setDirectory(dir))}
-          title={t("Elegir dónde se guarda")}
+          title={t("Choose where it gets saved")}
           className="flex w-full items-center gap-2 rounded-lg border border-white/8 bg-black/30 px-2.5 py-1.5 text-left transition-colors hover:border-white/20"
         >
           <FolderOpen className="size-4 shrink-0 text-neutral-400" />
           <span className="truncate text-[11px] text-neutral-400" title={directory}>
-            {directory || t("Elegir carpeta…")}
+            {directory || t("Choose a folder…")}
           </span>
         </button>
 
         <div className="flex items-center justify-between text-[11px] text-neutral-500">
           <span className="flex items-center gap-1.5">
-            {useFfmpeg && hasFfmpeg ? (
+            {useFfmpeg ? (
               <Cpu className="size-3.5" />
             ) : (
               <Zap className="size-3.5 text-amber-400" />
             )}
-            {useFfmpeg && hasFfmpeg ? "FFmpeg" : t("Nativo")}
+            {useFfmpeg ? "FFmpeg" : t("Built-in")}
           </span>
           <span className="tabular-nums">≈ {formatBytes(estimate)}</span>
         </div>
@@ -639,17 +638,17 @@ export function ExportPanel({
             type="button"
             disabled={progress !== null}
             onClick={() => void run(false)}
-            title={t("Exportar a la carpeta elegida (Ctrl+S)")}
+            title={t("Export to the chosen folder (Ctrl+S)")}
             className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-500 text-sm font-semibold whitespace-nowrap text-white transition-colors hover:bg-blue-400 disabled:opacity-50"
           >
-            <Save className="size-4" /> {t("Guardar")} {format.toUpperCase()}
+            <Save className="size-4" /> {t("Save")} {format.toUpperCase()}
           </button>
           <button
             type="button"
             disabled={progress !== null}
             onClick={() => void runAs(false)}
-            title={t("Elegir dónde guardar (Ctrl+Mayús+S)")}
-            aria-label={t("Elegir dónde guardar")}
+            title={t("Choose where to save (Ctrl+Shift+S)")}
+            aria-label={t("Choose where to save")}
             className="flex h-9 items-center justify-center rounded-lg border border-white/10 px-3 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
           >
             <FolderDown className="size-4" />
@@ -658,7 +657,7 @@ export function ExportPanel({
             type="button"
             disabled={progress !== null}
             onClick={() => void run(true)}
-            title={t("Exportar y copiar al portapapeles")}
+            title={t("Export and copy to the clipboard")}
             className="flex h-9 items-center justify-center rounded-lg border border-white/10 px-3 text-neutral-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
           >
             <Clipboard className="size-4" />
@@ -677,15 +676,15 @@ export function ExportPanel({
                     dice, porque «ya se puede pegar» y luego no ver nada al pegar en un
                     sitio que no admite archivos parece que la app haya mentido. */}
                 {format === "png"
-                  ? t("Copiado: ya se puede pegar")
-                  : t("Copiado: el archivo y su ruta")}
+                  ? t("Copied: ready to paste")
+                  : t("Copied: the file and its path")}
               </p>
             )}
             {/* Y si no se pudo, se dice por qué. Antes el fallo se tragaba y pulsar copiar
                 parecía no hacer absolutamente nada. */}
             {result.copyError && (
               <p className="rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">
-                {t("No se ha podido copiar")}: {t(result.copyError)}
+                {t("It could not be copied")}: {t(result.copyError)}
               </p>
             )}
             <button
@@ -695,7 +694,7 @@ export function ExportPanel({
             >
               <Sparkles className="size-3.5 shrink-0" />
               <span className="truncate">
-                {formatBytes(result.bytes)} · {t("abrir carpeta")}
+                {formatBytes(result.bytes)} · {t("open folder")}
               </span>
             </button>
           </>
