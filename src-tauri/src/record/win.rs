@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -35,14 +35,14 @@ pub struct CapturedFrame {
 
 #[derive(Clone)]
 pub struct CaptureFlags {
-    pub sender: Sender<CapturedFrame>,
+    pub sender: SyncSender<CapturedFrame>,
     /// Recorte dentro del monitor: x1, y1, x2, y2.
     pub crop: (u32, u32, u32, u32),
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     /// Milisegundos acumulados en pausa, para que el reloj no cuente ese tiempo.
     pub paused_ms: Arc<AtomicU64>,
-    pub min_interval_ms: u64,
+    pub min_interval: std::time::Duration,
     /// El cero del reloj de los fotogramas. Lo crea quien arranca la grabacion y lo
     /// comparte con el hilo que muestrea el raton: asi el rastro y la imagen van en el
     /// mismo tiempo. Antes cada uno tenia su `Instant::now()` y se separaban unos
@@ -86,9 +86,23 @@ impl Reciclados {
     }
 }
 
+fn frame_due(next: &mut Option<Instant>, now: Instant, interval: std::time::Duration) -> bool {
+    if interval.is_zero() {
+        return true;
+    }
+    let deadline = next.unwrap_or(now);
+    let tolerance = (interval / 16).min(std::time::Duration::from_micros(500));
+    if now + tolerance < deadline {
+        return false;
+    }
+    let periods = now.saturating_duration_since(deadline).as_nanos() / interval.as_nanos() + 1;
+    *next = Some(deadline + interval.mul_f64(periods as f64));
+    true
+}
+
 pub struct RegionCapture {
     flags: CaptureFlags,
-    last_emit: Option<Instant>,
+    next_emit: Option<Instant>,
     /// El apoyo que necesita el crate cuando la textura viene con relleno de fila. Se
     /// guarda entre fotogramas para no reservar ocho megabytes nuevos sesenta veces por
     /// segundo: la copia que se manda por el canal sigue siendo una, esta no cuenta.
@@ -102,7 +116,7 @@ impl GraphicsCaptureApiHandler for RegionCapture {
     fn new(ctx: Context<Self::Flags>) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
             flags: ctx.flags,
-            last_emit: None,
+            next_emit: None,
             scratch: Vec::new(),
         })
     }
@@ -120,14 +134,12 @@ impl GraphicsCaptureApiHandler for RegionCapture {
             return Ok(());
         }
 
-        // Windows entrega fotogramas al ritmo del compositor; aqui se recorta al fps pedido.
+        // Keep a target cadence without rounding 120 fps to whole milliseconds or
+        // halving delivery when the monitor runs at a different refresh rate.
         let now = Instant::now();
-        if let Some(last) = self.last_emit {
-            if now.duration_since(last).as_millis() < self.flags.min_interval_ms as u128 {
-                return Ok(());
-            }
+        if !frame_due(&mut self.next_emit, now, self.flags.min_interval) {
+            return Ok(());
         }
-        self.last_emit = Some(now);
 
         let (x1, y1, x2, y2) = self.flags.crop;
         // Grabando una VENTANA, su tamanno puede cambiar mientras se graba, y el
@@ -160,7 +172,21 @@ impl GraphicsCaptureApiHandler for RegionCapture {
 
         let elapsed = now.duration_since(self.flags.start).as_millis() as u64;
         let ts_ms = elapsed.saturating_sub(self.flags.paused_ms.load(Ordering::Relaxed));
-        let _ = self.flags.sender.send(CapturedFrame { bgra: data, ts_ms });
+        // Bound queued raw frames so high-rate capture cannot grow memory without
+        // limit when encoding or storage is slower. Timing retains the real gap.
+        match self
+            .flags
+            .sender
+            .try_send(CapturedFrame { bgra: data, ts_ms })
+        {
+            Ok(()) => {}
+            Err(TrySendError::Full(frame)) => self.flags.reciclados.devolver(frame.bgra),
+            Err(TrySendError::Disconnected(frame)) => {
+                self.flags.reciclados.devolver(frame.bgra);
+                self.flags.stop.store(true, Ordering::Relaxed);
+                control.stop();
+            }
+        }
         Ok(())
     }
 
@@ -170,8 +196,10 @@ impl GraphicsCaptureApiHandler for RegionCapture {
     }
 }
 
-pub type Control =
-    windows_capture::capture::CaptureControl<RegionCapture, Box<dyn std::error::Error + Send + Sync>>;
+pub type Control = windows_capture::capture::CaptureControl<
+    RegionCapture,
+    Box<dyn std::error::Error + Send + Sync>,
+>;
 
 /// Arranca la captura de la region sobre el monitor que la contiene.
 /// `monitor_origin` viene de la enumeracion de xcap, que si expone coordenadas.
@@ -189,7 +217,7 @@ pub fn start(
     let y1 = (region.y - monitor_origin.1).max(0) as u32;
     let flags = CaptureFlags {
         crop: (x1, y1, x1 + region.width, y1 + region.height),
-        min_interval_ms: (1000 / fps.max(1)).saturating_sub(1) as u64,
+        min_interval: std::time::Duration::from_secs_f64(1.0 / f64::from(fps.max(1))),
         ..flags_base
     };
 
@@ -250,10 +278,8 @@ pub fn start_window(
     let alto = (marco.bottom - marco.top).max(1) as u32;
 
     let flags = CaptureFlags {
-        // Entera: el recorte dentro de la ventana lo hace despues el editor, que ahi si se
-        // puede deshacer.
         crop: (0, 0, ancho, alto),
-        min_interval_ms: (1000 / fps.max(1)).saturating_sub(1) as u64,
+        min_interval: std::time::Duration::from_secs_f64(1.0 / f64::from(fps.max(1))),
         ..flags_base
     };
 
@@ -279,7 +305,7 @@ pub fn start_window(
 mod tests {
     use super::*;
 
-    use std::sync::mpsc::channel;
+    use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
     use windows::core::PCWSTR;
@@ -288,13 +314,22 @@ mod tests {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, ShowWindow,
-        SW_SHOWNOACTIVATE, WNDCLASSW,
-        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+        SW_SHOWNOACTIVATE, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+        WS_EX_TRANSPARENT, WS_POPUP,
     };
 
     const CLASE: &[u16] = &[
-        b'w' as u16, b's' as u16, b'x' as u16, b'-' as u16, b'p' as u16, b'r' as u16,
-        b'u' as u16, b'e' as u16, b'b' as u16, b'a' as u16, 0,
+        b'w' as u16,
+        b's' as u16,
+        b'x' as u16,
+        b'-' as u16,
+        b'p' as u16,
+        b'r' as u16,
+        b'u' as u16,
+        b'e' as u16,
+        b'b' as u16,
+        b'a' as u16,
+        0,
     ];
 
     /// Lo unico que hace esta ventana es dejarse pintar del color de su clase.
@@ -351,7 +386,7 @@ mod tests {
         };
         let hwnd = HWND(ventana as *mut core::ffi::c_void);
         let mut paso = 0;
-        let (sender, receiver) = channel::<CapturedFrame>();
+        let (sender, receiver) = sync_channel::<CapturedFrame>(2);
         let stop = Arc::new(AtomicBool::new(false));
         let control = start(
             region,
@@ -364,7 +399,7 @@ mod tests {
                 stop: stop.clone(),
                 pause: Arc::new(AtomicBool::new(false)),
                 paused_ms: Arc::new(AtomicU64::new(0)),
-                min_interval_ms: 0,
+                min_interval: std::time::Duration::ZERO,
                 start: Instant::now(),
                 reciclados: Reciclados::default(),
             },
@@ -413,7 +448,7 @@ mod tests {
         };
         let hwnd = HWND(ventana as *mut core::ffi::c_void);
         let mut paso = 0;
-        let (sender, receiver) = channel::<CapturedFrame>();
+        let (sender, receiver) = sync_channel::<CapturedFrame>(2);
         let stop = Arc::new(AtomicBool::new(false));
         let control = start_window(
             ventana,
@@ -425,7 +460,7 @@ mod tests {
                 stop: stop.clone(),
                 pause: Arc::new(AtomicBool::new(false)),
                 paused_ms: Arc::new(AtomicU64::new(0)),
-                min_interval_ms: 0,
+                min_interval: std::time::Duration::ZERO,
                 start: Instant::now(),
                 reciclados: Reciclados::default(),
             },
@@ -481,14 +516,22 @@ mod tests {
     #[test]
     #[ignore = "abre dos ventanas en la pantalla y graba un trozo: se corre a mano"]
     fn grabar_una_ventana_tapada_la_graba_a_ella_y_no_a_lo_de_delante() {
-        let region = Rect { x: 0, y: 0, width: 160, height: 120 };
+        let region = Rect {
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 120,
+        };
         let abajo = ventana_magenta(region);
         std::thread::sleep(Duration::from_millis(300));
 
         let suyo = graba_la_ventana(abajo, region).expect("sin fotogramas de la ventana");
         let antes = cuanto_magenta(&suyo);
         println!("sin nada delante: {antes:.1}% magenta");
-        assert!(antes > 50.0, "la ventana no se graba ni estando a la vista: {antes:.1}%");
+        assert!(
+            antes > 50.0,
+            "la ventana no se graba ni estando a la vista: {antes:.1}%"
+        );
 
         // Y ahora una verde del mismo tamanno encima, que la tapa entera.
         let encima = ventana_tapadera(region);
@@ -517,70 +560,16 @@ mod tests {
         );
     }
 
-    /// **El estudio sigue a la ventana cuando se mueve.**
-    ///
-    /// Los aros de clic y el rastro del raton se guardan en coordenadas de lo que se
-    /// graba, restando la esquina de la zona. Grabando una VENTANA esa esquina cambia en
-    /// cuanto alguien la arrastra, asi que se pregunta en cada muestra: si se guardara la
-    /// del principio, al mover la ventana los aros saldrian corridos justo lo que se movio.
-    ///
-    ///     cargo test --lib la_esquina_sigue -- --ignored --nocapture
-    #[test]
-    #[ignore = "abre una ventana en la pantalla y la mueve: se corre a mano"]
-    fn la_esquina_sigue_a_la_ventana_cuando_se_mueve() {
-        use crate::record::anotador::esquina_de_la_ventana;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
-        };
-
-        let region = Rect { x: 40, y: 40, width: 160, height: 120 };
-        let ventana = ventana_magenta(region);
-        std::thread::sleep(Duration::from_millis(250));
-
-        let antes = esquina_de_la_ventana(ventana).expect("sin esquina al empezar");
-        println!("esquina al empezar: {antes:?}");
-
-        // Se mueve 120 px a la derecha y 60 hacia abajo, como haria cualquiera.
-        let hwnd = HWND(ventana as *mut core::ffi::c_void);
-        let _ = unsafe {
-            SetWindowPos(
-                hwnd,
-                None,
-                region.x + 120,
-                region.y + 60,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        };
-        std::thread::sleep(Duration::from_millis(250));
-        let despues = esquina_de_la_ventana(ventana).expect("sin esquina despues de mover");
-        println!("esquina despues de mover: {despues:?}");
-
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
-
-        let (dx, dy) = (despues.0 - antes.0, despues.1 - antes.1);
-        assert!(
-            (dx - 120).abs() <= 2 && (dy - 60).abs() <= 2,
-            "la esquina tenia que moverse 120 x 60 y se ha movido {dx} x {dy}"
-        );
-    }
-
-    /// Y si la ventana ya no esta, no hay esquina: quien pregunta se queda con la ultima
-    /// que supo, que es mejor que mandar todos los aros al cero de la pantalla.
-    #[test]
-    fn una_ventana_que_no_existe_no_da_esquina() {
-        use crate::record::anotador::esquina_de_la_ventana;
-        assert!(esquina_de_la_ventana(0).is_none());
-        assert!(esquina_de_la_ventana(0x7FFF_FFFF).is_none());
-    }
-
     /// Una ventana verde del mismo tamanno, para ponerla encima.
     fn ventana_tapadera(region: Rect) -> isize {
         const CLASE_VERDE: &[u16] = &[
-            b'w' as u16, b's' as u16, b'x' as u16, b't' as u16, b'a' as u16, b'p' as u16, 0,
+            b'w' as u16,
+            b's' as u16,
+            b'x' as u16,
+            b't' as u16,
+            b'a' as u16,
+            b'p' as u16,
+            0,
         ];
         let instancia = unsafe { GetModuleHandleW(None) }.expect("sin instancia");
         let clase = WNDCLASSW {
@@ -623,7 +612,12 @@ mod tests {
     #[test]
     #[ignore = "abre una ventana en la pantalla y graba un trozo: se corre a mano"]
     fn una_ventana_excluida_no_sale_en_lo_que_se_graba() {
-        let region = Rect { x: 0, y: 0, width: 160, height: 120 };
+        let region = Rect {
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 120,
+        };
         let ventana = ventana_magenta(region);
         std::thread::sleep(Duration::from_millis(300));
 
@@ -642,6 +636,69 @@ mod tests {
         unsafe {
             let _ = DestroyWindow(HWND(ventana as *mut core::ffi::c_void));
         }
-        assert!(!sigue, "la ventana excluida se sigue colando en la grabacion");
+        assert!(
+            !sigue,
+            "la ventana excluida se sigue colando en la grabacion"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    #[test]
+    fn a_144_hz_source_can_deliver_a_120_fps_target() {
+        let start = Instant::now();
+        let mut next = None;
+        let interval = std::time::Duration::from_secs_f64(1.0 / 120.0);
+        let accepted = (0..1440)
+            .filter(|i| {
+                frame_due(
+                    &mut next,
+                    start + std::time::Duration::from_secs_f64(*i as f64 / 144.0),
+                    interval,
+                )
+            })
+            .count();
+        assert!(
+            (1199..=1201).contains(&accepted),
+            "{accepted} frames in ten seconds"
+        );
+    }
+    #[test]
+    fn a_240_hz_source_is_limited_to_120_fps_without_phase_drift() {
+        let start = Instant::now();
+        let mut next = None;
+        let interval = std::time::Duration::from_secs_f64(1.0 / 120.0);
+        let accepted = (0..2400)
+            .filter(|i| {
+                frame_due(
+                    &mut next,
+                    start + std::time::Duration::from_secs_f64(*i as f64 / 240.0),
+                    interval,
+                )
+            })
+            .count();
+        assert!(
+            (1199..=1201).contains(&accepted),
+            "{accepted} frames in ten seconds"
+        );
+    }
+    #[test]
+    fn small_delivery_jitter_does_not_drop_every_other_frame() {
+        let start = Instant::now();
+        let mut next = None;
+        let interval = std::time::Duration::from_secs_f64(1.0 / 120.0);
+        let accepted = (0..1200)
+            .filter(|i| {
+                let jitter = if i % 2 == 0 { 0.0001 } else { 0.0 };
+                frame_due(
+                    &mut next,
+                    start + std::time::Duration::from_secs_f64(*i as f64 / 120.0 + jitter),
+                    interval,
+                )
+            })
+            .count();
+        assert_eq!(accepted, 1200);
     }
 }

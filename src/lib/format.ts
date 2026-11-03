@@ -1,4 +1,4 @@
-/** Formateo compartido por el overlay y el editor. */
+
 
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));

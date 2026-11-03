@@ -1,4 +1,4 @@
-import { Camera, Monitor, PanelBottom, Settings, Video, X } from "lucide-react";
+import { AppWindow, Camera, RectangleHorizontal, Monitor, PanelBottom, Settings, Video, X } from "lucide-react";
 import type { CaptureMode } from "../../lib/types";
 import { useT } from "../../lib/i18n";
 
@@ -12,6 +12,8 @@ import { useT } from "../../lib/i18n";
 export const SELECTOR_BARRA = "[data-barra-modos]";
 
 interface Props {
+  target?: import("../../lib/types").CaptureTarget;
+  onTarget?: (v: import("../../lib/types").CaptureTarget) => void;
   value: CaptureMode;
   onChange: (mode: CaptureMode) => void;
   /** Coger la pantalla entera de un clic, sin arrastrar nada. */
@@ -39,6 +41,8 @@ interface Props {
  * nada más. El texto vive en el tooltip, para quien lo necesite.
  */
 export function ModeBar({
+  target = "rectangle",
+  onTarget,
   value,
   onChange,
   pantallaEntera,
@@ -54,14 +58,14 @@ export function ModeBar({
     <div
       data-barra-modos
       className={`group absolute top-6 left-1/2 z-50 -translate-x-1/2 transition-opacity duration-150 ${
-        dimmed ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100 hover:opacity-40"
+        dimmed ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100"
       }`}
     >
       {/* Al pasar el raton por encima se aparta: pierde el panel, la sombra y el
           desenfoque, y se queda en un fantasma. La franja de arriba del centro es sitio
           de capturar, y un rectangulo negro ahi tapaba justo lo que se iba a recortar.
           Sigue pulsandose igual, y el arrastre la atraviesa (ver SELECTOR_BARRA). */}
-      <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900/90 p-1.5 shadow-2xl backdrop-blur-xl transition-[background-color,border-color,box-shadow,backdrop-filter] duration-150 group-hover:border-white/5 group-hover:bg-neutral-900/10 group-hover:shadow-none group-hover:backdrop-blur-none">
+      <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900/90 p-1.5 shadow-2xl backdrop-blur-xl transition-[background-color,border-color,box-shadow,backdrop-filter] duration-150 ">
         <Boton
           activo={value === "still"}
           onClick={() => onChange("still")}
@@ -84,9 +88,11 @@ export function ModeBar({
 
         {/* El otro eje: los tres de arriba dicen QUE sale, este dice DE DONDE. Con varias
             pantallas, cada una se pone su numero encima y se coge con un clic. */}
+        <Boton activo={!pantallaEntera && target === "rectangle"} onClick={() => onTarget?.("rectangle")} etiqueta="Rectangle" titulo="Select a rectangle"><RectangleHorizontal className="size-[19px]" /></Boton>
+        <Boton activo={!pantallaEntera && target === "window"} onClick={() => onTarget?.("window")} etiqueta="Window" titulo="Select a window"><AppWindow className="size-[19px]" /></Boton>
         <Boton
           activo={pantallaEntera}
-          onClick={() => onPantallaEntera(!pantallaEntera)}
+          onClick={() => onTarget ? onTarget(pantallaEntera ? "rectangle" : "screen") : onPantallaEntera(!pantallaEntera)}
           etiqueta="Whole screen"
           titulo="Whole screen, one click · P"
         >

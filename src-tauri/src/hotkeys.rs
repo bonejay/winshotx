@@ -19,10 +19,6 @@ pub const WIN_SHIFT_S: &str = "Super+Shift+KeyS";
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutStatus {
     pub capture: bool,
-    /// La tecla que captura y abre el editor de una vez. Puede fallar sin que sea culpa
-    /// de nadie: la combinación de fábrica lleva la tecla Windows, y esas se las puede
-    /// haber quedado otra aplicación.
-    pub edit: bool,
     pub record: bool,
     /// La tecla que se queda con los ultimos segundos. Solo se pide cuando el anillo esta
     /// encendido: quitarle una combinacion a alguien que no usa la funcion seria cobrarle
@@ -42,18 +38,6 @@ fn on_capture(app: &AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
     }
     if let Err(error) = windows_mgr::open_overlays(app, OverlayIntent::Capture) {
         eprintln!("no se ha podido abrir el overlay: {error}");
-    }
-}
-
-/// Capturar y abrir el editor de una vez. Lo unico que cambia es la intencion: el
-/// overlay es el mismo y la foto es la misma, pero al soltar la seleccion no sale la barra
-/// para elegir, se abre el editor.
-fn on_edit(app: &AppHandle, _shortcut: &Shortcut, event: ShortcutEvent) {
-    if event.state() != ShortcutState::Pressed {
-        return;
-    }
-    if let Err(error) = windows_mgr::open_overlays(app, OverlayIntent::Edit) {
-        eprintln!("no se ha podido abrir el overlay del editor: {error}");
     }
 }
 
@@ -104,28 +88,6 @@ pub fn register(app: &AppHandle, settings: &Settings) -> ShortcutStatus {
         }
     }
 
-    // La captura que va derecha al editor. Si la combinacion no se consigue, se dice y
-    // se sigue: perder esta tecla no puede dejar sin capturar a nadie.
-    match settings.edit_shortcut.parse::<Shortcut>() {
-        Err(error) => eprintln!("atajo del editor invalido: {error}"),
-        Ok(shortcut) => {
-            if puestos.contains(&shortcut) {
-                eprintln!(
-                    "[atajo] {} ya esta cogida por otro atajo de winshotx",
-                    settings.edit_shortcut
-                );
-            } else if let Err(error) = manager.on_shortcut(shortcut, on_edit) {
-                eprintln!(
-                    "el atajo del editor {} no se ha podido registrar: {error}",
-                    settings.edit_shortcut
-                );
-            } else {
-                status.edit = true;
-                puestos.push(shortcut);
-            }
-        }
-    }
-
     // Impr Pant es la tecla que la gente ya tiene en los dedos, pero en Windows 11 se
     // la queda la Herramienta de Recortes. Si ese ajuste sigue puesto, esto se registra
     // sin quejarse y luego no llega ninguna pulsacion: por eso se apaga antes, en
@@ -142,7 +104,6 @@ pub fn register(app: &AppHandle, settings: &Settings) -> ShortcutStatus {
                 }
             }
         }
-
     }
 
     match settings.record_shortcut.parse::<Shortcut>() {
@@ -175,7 +136,6 @@ pub fn register(app: &AppHandle, settings: &Settings) -> ShortcutStatus {
 
     // La tecla de los ultimos segundos solo existe mientras el anillo esta encendido.
 
-
     // Win+Mayus+S solo se pide si se acepto pagar lo que cuesta, y va la ultima porque
     // antes hay que saber si el usuario ya la puso como atajo suyo.
     //
@@ -201,24 +161,6 @@ pub fn register(app: &AppHandle, settings: &Settings) -> ShortcutStatus {
 
     // Lo que dice el plugin y lo que dice el sistema no siempre coinciden: el registro se
     // encola en el hilo principal y puede darse por bueno antes de que Windows conteste.
-    let de_verdad = |texto: &str| -> bool {
-        texto
-            .parse::<Shortcut>()
-            .map(|s| manager.is_registered(s))
-            .unwrap_or(false)
-    };
-    eprintln!(
-        "[atajo] registrados: captura={} ({}, sistema={}) editor={} ({}, sistema={}) grabacion={} imprPant={} (sistema={})",
-        status.capture,
-        settings.capture_shortcut,
-        de_verdad(&settings.capture_shortcut),
-        status.edit,
-        settings.edit_shortcut,
-        de_verdad(&settings.edit_shortcut),
-        status.record,
-        status.print_screen,
-        de_verdad(PRINT_SCREEN)
-    );
     *state.registered.write() = puestos;
     *state.shortcuts.write() = status;
     status
@@ -240,6 +182,7 @@ mod tests {
     #[test]
     fn las_combinaciones_sugeridas_se_entienden() {
         for sugerida in [
+            "Shift+PrintScreen",
             "CmdOrCtrl+Shift+Digit2",
             "CmdOrCtrl+Shift+Digit5",
             "CmdOrCtrl+Alt+KeyA",
@@ -247,7 +190,6 @@ mod tests {
             "Alt+KeyX",
             "Alt+KeyV",
             "CmdOrCtrl+Shift+KeyS",
-            // La del editor. Lleva la tecla Windows, como Win+Mayus+S.
             "Super+Shift+KeyL",
         ] {
             assert!(sugerida.parse::<Shortcut>().is_ok(), "{sugerida}");

@@ -3,8 +3,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::Serialize;
 
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
 };
 
 use parking_lot::Mutex;
@@ -68,7 +67,6 @@ static OVERLAY_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 pub const RECORDER_PREFIX: &str = "recorder-";
 /// Las capturas ancladas. Puede haber varias a la vez, cada una con su numero.
 pub const PIN_PREFIX: &str = "pin-";
-pub const EDITOR_LABEL: &str = "editor";
 /// La ventanita de la cuenta atras del temporizador. Solo hay una, en la pantalla donde
 /// este el raton, y como los overlays se esconde en vez de cerrarse.
 pub const COUNTDOWN_LABEL: &str = "countdown";
@@ -88,8 +86,6 @@ const MARGEN_REPINTADO: std::time::Duration = std::time::Duration::from_millis(1
 #[serde(rename_all = "camelCase")]
 pub enum OverlayIntent {
     Capture,
-    /// Capturar y abrir el editor de una vez, sin pasar por la barra de la selección.
-    Edit,
     Record,
 }
 
@@ -928,41 +924,6 @@ pub fn close_recorder(app: &AppHandle) {
             let _ = window.close();
         }
     }
-}
-
-/// Editor de recorte y exportacion para una sesion ya grabada.
-///
-/// **Con el marco de Windows, no con una barra dibujada.** Es una ventana normal, de las
-/// que se minimizan, se maximizan y se cierran con los botones que todo el mundo conoce,
-/// y las ventanas normales de winshotx llevan el marco del sistema. Los overlays, la barra
-/// de grabacion, la cuenta atras y las capturas ancladas van sin marco porque son
-/// herramientas flotantes, no ventanas.
-pub fn open_editor(app: &AppHandle, session_id: &str) -> Result<()> {
-    for (label, window) in app.webview_windows() {
-        if label.starts_with(EDITOR_LABEL) {
-            let _ = window.close();
-        }
-    }
-    let label = format!(
-        "{EDITOR_LABEL}-{}",
-        OVERLAY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    );
-    let url = WebviewUrl::App(format!("editor.html?session={session_id}").into());
-    let window = WebviewWindowBuilder::new(app, &label, url)
-        .additional_browser_args(NAVEGADOR_ARGS)
-        .title("winshotx · editor")
-        .decorations(true)
-        .resizable(true)
-        .inner_size(1180.0, 800.0)
-        .min_inner_size(760.0, 520.0)
-        .center()
-        .visible(true)
-        .build()?;
-    // Sin `rounded_corners`: eso es para las ventanas sin marco. El marco del sistema ya
-    // trae las esquinas que Windows quiere, y forzarlas encima deja un borde raro.
-    let _ = window.set_min_size(Some(LogicalSize::new(760.0, 520.0)));
-    window.set_focus()?;
-    Ok(())
 }
 
 /// Deja la captura flotando encima de todo, para tenerla a la vista mientras se trabaja.

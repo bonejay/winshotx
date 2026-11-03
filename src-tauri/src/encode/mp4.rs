@@ -81,16 +81,6 @@ impl Pista {
     }
 }
 
-/// El lado mas corto que Media Foundation acepta codificar.
-///
-/// **Medido el 17 de octubre de 2026 en la maquina de Munir**, probando tamannos uno a
-/// uno contra el codificador de verdad: 96x64 sale, 96x48 no; 64x160 sale, 48x320 no.
-/// Por debajo de este lado, `VideoEncoder::new` contesta «Puntero no valido»
-/// (0x80004003) y la grabacion se queda sin video sin que el error diga nada util.
-///
-/// No es un capricho: grabar un trozo pequenno es un caso normal (una fila de una tabla,
-/// un boton, un cartel de error), y ahi el editor decia «Sin vista previa» y el MP4
-/// exportado no salia.
 const LADO_MINIMO: u32 = 64;
 
 /// El tamanno mas parecido al pedido que el codificador si acepta.

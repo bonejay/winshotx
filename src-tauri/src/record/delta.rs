@@ -47,7 +47,8 @@ pub fn zona_cambiada(anterior: &[u8], actual: &[u8], width: u32, height: u32) ->
         });
     }
 
-    let primera = (0..alto).find(|&y| anterior[y * fila..(y + 1) * fila] != actual[y * fila..(y + 1) * fila])?;
+    let primera = (0..alto)
+        .find(|&y| anterior[y * fila..(y + 1) * fila] != actual[y * fila..(y + 1) * fila])?;
     let ultima = (primera..alto)
         .rev()
         .find(|&y| anterior[y * fila..(y + 1) * fila] != actual[y * fila..(y + 1) * fila])
@@ -160,10 +161,14 @@ pub fn zonas_cambiadas(anterior: &[u8], actual: &[u8], width: u32, height: u32) 
                 if a == b {
                     continue;
                 }
-                if let Some(x) = (0..ancho).find(|&x| a[x * CANALES..(x + 1) * CANALES] != b[x * CANALES..(x + 1) * CANALES]) {
+                if let Some(x) = (0..ancho).find(|&x| {
+                    a[x * CANALES..(x + 1) * CANALES] != b[x * CANALES..(x + 1) * CANALES]
+                }) {
                     izquierda = izquierda.min(x);
                 }
-                if let Some(x) = (0..ancho).rev().find(|&x| a[x * CANALES..(x + 1) * CANALES] != b[x * CANALES..(x + 1) * CANALES]) {
+                if let Some(x) = (0..ancho).rev().find(|&x| {
+                    a[x * CANALES..(x + 1) * CANALES] != b[x * CANALES..(x + 1) * CANALES]
+                }) {
                     derecha = derecha.max(x);
                 }
             }
@@ -218,7 +223,8 @@ pub fn copiar_zona(destino: &mut [u8], origen: &[u8], width: u32, parche: Parche
         if inicio + fila_parche > destino.len() || inicio + fila_parche > origen.len() {
             return;
         }
-        destino[inicio..inicio + fila_parche].copy_from_slice(&origen[inicio..inicio + fila_parche]);
+        destino[inicio..inicio + fila_parche]
+            .copy_from_slice(&origen[inicio..inicio + fila_parche]);
     }
 }
 
@@ -232,7 +238,8 @@ pub fn aplicar(destino: &mut [u8], width: u32, parche: Parche, pixeles: &[u8]) {
         if inicio + fila_parche > destino.len() || origen + fila_parche > pixeles.len() {
             return;
         }
-        destino[inicio..inicio + fila_parche].copy_from_slice(&pixeles[origen..origen + fila_parche]);
+        destino[inicio..inicio + fila_parche]
+            .copy_from_slice(&pixeles[origen..origen + fila_parche]);
     }
 }
 
@@ -291,8 +298,18 @@ mod tests {
         assert_eq!(
             zonas,
             vec![
-                Parche { x: 2, y: 3, width: 1, height: 1 },
-                Parche { x: 60, y: 58, width: 1, height: 1 },
+                Parche {
+                    x: 2,
+                    y: 3,
+                    width: 1,
+                    height: 1
+                },
+                Parche {
+                    x: 60,
+                    y: 58,
+                    width: 1,
+                    height: 1
+                },
             ]
         );
         // Y la envolvente es lo que daba la caja unica.
@@ -308,7 +325,15 @@ mod tests {
         pintar(&mut b, 32, 5, 10, [255, 255, 255, 255]);
         pintar(&mut b, 32, 20, 14, [255, 255, 255, 255]);
         let zonas = zonas_cambiadas(&a, &b, 32, 32);
-        assert_eq!(zonas, vec![Parche { x: 5, y: 10, width: 16, height: 5 }]);
+        assert_eq!(
+            zonas,
+            vec![Parche {
+                x: 5,
+                y: 10,
+                width: 16,
+                height: 5
+            }]
+        );
     }
 
     /// Mas de cuatro cambios repartidos: se juntan los mas cercanos hasta quedar en cuatro,
@@ -325,14 +350,19 @@ mod tests {
         assert_eq!(zonas.len(), ZONAS_MAX);
         for y in [10u32, 30, 70, 110, 150, 190] {
             assert!(
-                zonas.iter().any(|z| y >= z.y && y < z.y + z.height && z.x <= 8 && 8 < z.x + z.width),
+                zonas
+                    .iter()
+                    .any(|z| y >= z.y && y < z.y + z.height && z.x <= 8 && 8 < z.x + z.width),
                 "la fila {y} cambio y ninguna zona la cubre: {zonas:?}"
             );
         }
         // Las zonas no se pisan entre si.
         for (i, z) in zonas.iter().enumerate() {
             for otra in &zonas[i + 1..] {
-                assert!(z.y + z.height <= otra.y, "dos zonas se solapan: {z:?} y {otra:?}");
+                assert!(
+                    z.y + z.height <= otra.y,
+                    "dos zonas se solapan: {z:?} y {otra:?}"
+                );
             }
         }
     }
@@ -343,7 +373,15 @@ mod tests {
         let a = liso(16, 8, [10, 20, 30, 255]);
         assert!(zonas_cambiadas(&a, &a.clone(), 16, 8).is_empty());
         let corto = vec![0u8; 16];
-        assert_eq!(zonas_cambiadas(&a, &corto, 16, 8), vec![Parche { x: 0, y: 0, width: 16, height: 8 }]);
+        assert_eq!(
+            zonas_cambiadas(&a, &corto, 16, 8),
+            vec![Parche {
+                x: 0,
+                y: 0,
+                width: 16,
+                height: 8
+            }]
+        );
     }
 
     /// Dos cambios lejanos: el rectangulo tiene que abarcarlos a los dos, porque se guarda
@@ -365,8 +403,6 @@ mod tests {
         );
     }
 
-    /// Lo unico que de verdad importa: recortar y volver a pegar tiene que devolver el
-    /// fotograma exacto, pixel a pixel. Si esto falla, el editor ensenna basura.
     #[test]
     fn recortar_y_pegar_reconstruye_el_fotograma_entero() {
         let a = liso(32, 20, [7, 7, 7, 255]);

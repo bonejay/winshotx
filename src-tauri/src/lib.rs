@@ -1,4 +1,5 @@
 pub mod archivos;
+mod audio_devices;
 pub mod capture;
 pub(crate) mod commands;
 pub mod crono;
@@ -10,9 +11,7 @@ mod hotkeys;
 mod platform;
 pub mod record;
 mod recorder;
-mod preview;
 mod settings;
-pub mod sensibles;
 mod state;
 mod tray;
 mod windows_mgr;
@@ -39,13 +38,6 @@ pub const EVENT_OVERLAY_SHOW: &str = "winshotx://overlay-show";
 /// que a partir de ahi baja sola de segundo en segundo: Rust solo dice el numero de
 /// partida y avisa con un cero cuando se acabo.
 pub const EVENT_COUNTDOWN: &str = "winshotx://countdown";
-
-/// El video de vista previa de una sesion ya esta escrito, y con el llega el play.
-///
-/// Lo manda el anillo de los ultimos segundos, que abre el editor antes de tener el video
-/// para no hacer esperar doce segundos a quien acaba de pulsar la tecla. Lleva el id de la
-/// sesion: el editor mira si es la suya y la vuelve a pedir.
-pub const EVENT_SESSION_PREVIEW: &str = "winshotx://session-preview";
 
 /// El menú de la bandeja se acaba de abrir: que vuelva a leer el estado.
 pub const EVENT_TRAY_MENU_OPENED: &str = "winshotx://tray-menu-opened";
@@ -91,7 +83,7 @@ fn purge_old_sessions(root: &std::path::Path) {
                     > limit
             })
             .unwrap_or(false);
-        if stale {
+        if stale && !entry.path().join("keep-on-error").exists() {
             let _ = std::fs::remove_dir_all(entry.path());
         }
     }
@@ -118,7 +110,9 @@ pub fn run() {
             // desde fuera (un guion, otra herramienta, el cronometro), y `--cancel` la
             // cierra. Sin argumentos, lo de siempre: ensennar los ajustes.
             if args.iter().any(|arg| arg == "--capture") {
-                if let Err(error) = windows_mgr::open_overlays(app, windows_mgr::OverlayIntent::Capture) {
+                if let Err(error) =
+                    windows_mgr::open_overlays(app, windows_mgr::OverlayIntent::Capture)
+                {
                     eprintln!("no se ha podido abrir el overlay: {error}");
                 }
                 return;
@@ -136,6 +130,24 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let mut config = settings::load(&handle);
+            // Configure a supplied executable once, without changing the Windows PATH.
+            let mut launch_args = std::env::args();
+            while let Some(argument) = launch_args.next() {
+                if argument == "--ffmpeg-path" {
+                    if let Some(path) = launch_args.next() {
+                        if !crate::encode::ffmpeg::available_at(&path) {
+                            return Err(
+                                "The supplied FFmpeg executable could not be started.".into()
+                            );
+                        }
+                        config.encoding.ffmpeg_path = path;
+                        config.encoding.engine = "ffmpeg".into();
+                        config.encoding.rate_control = "crf".into();
+                        config.encoding.crf = 20;
+                        settings::save(&handle, &config)?;
+                    }
+                }
+            }
 
             // Actualizar desde los propios ajustes acaba en `relaunch()`, y winshotx vuelve
             // a arrancar en la bandeja: la version nueva entra pero no se ve nada, ni
@@ -171,7 +183,6 @@ pub fn run() {
             #[cfg(windows)]
             if config.print_screen_capture {
                 let _ = platform::snipping::write(0);
-
             }
 
             // Y la S fuera de los atajos del escritorio, solo si se pidio esa opcion
@@ -215,6 +226,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
+                audio_devices::stop(None);
+            }
             // Cerrar los ajustes no cierra la app: sigue viva en la bandeja.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
@@ -241,25 +255,21 @@ pub fn run() {
             commands::stop_recording,
             commands::pause_recording,
             commands::cancel_recording,
-            commands::session_info,
-            commands::session_frames,
-            commands::session_studio,
-            commands::session_camera,
-            commands::frame_image,
-            commands::export_media,
-            commands::tapar_datos,
-            commands::copiar_texto,
             commands::ultimas_capturas,
             commands::copiar_captura,
             commands::ffmpeg_available,
+            commands::ffmpeg_info,
+            commands::test_encoder,
+            commands::list_audio_devices,
+            commands::start_audio_preview,
+            commands::audio_preview_levels,
+            commands::stop_audio_preview,
             commands::get_settings,
             commands::set_settings,
             commands::set_capture_flow,
             commands::open_settings,
             commands::pick_directory,
-            commands::pick_save_file,
             commands::reveal_in_explorer,
-            commands::discard_session,
             commands::just_updated,
             commands::is_store_build,
             commands::cache_stats,

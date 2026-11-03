@@ -3,31 +3,19 @@ use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use image::RgbaImage;
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::capture::Rect;
 use crate::error::{AppError, Result};
 
 #[cfg(windows)]
-pub mod anotador;
-#[cfg(windows)]
-pub mod punteros;
-#[cfg(windows)]
 pub mod audio;
-mod bench_thumbs;
 pub mod delta;
 pub mod mezcla;
-pub mod pastilla;
-pub mod raton;
-pub mod realce;
-pub mod teclas;
 #[cfg(windows)]
 pub mod win;
 
 use delta::Parche;
-
-pub const THUMB_HEIGHT: u32 = 80;
 
 /// Un fotograma dentro del cache: se guarda en QOI, que es sin perdida y muy rapido.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -36,7 +24,6 @@ pub struct FrameEntry {
     pub index: u32,
     pub timestamp_ms: u64,
     pub duration_ms: u32,
-    pub thumb_path: String,
     pub offset: u64,
     pub len: u32,
     /// La zona que cambio respecto al fotograma anterior, o `None` si lo que hay guardado
@@ -98,19 +85,7 @@ impl AudioInfo {
     }
 }
 
-/// Un puntero leido de Windows durante la grabacion, ya en disco.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PunteroGrabado {
-    pub id: u32,
-    pub ancho: u32,
-    pub alto: u32,
-    /// El punto caliente, en pixeles de la propia imagen.
-    pub caliente: (u32, u32),
-    /// El PNG con la imagen, con transparencia.
-    pub archivo: String,
-}
-
+/// Captured frames and mixed audio retained only until a recording is saved.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionData {
@@ -123,54 +98,7 @@ pub struct SessionData {
     pub width: u32,
     pub height: u32,
     pub mp4_path: Option<PathBuf>,
-    #[serde(default)]
     pub audio: Option<AudioInfo>,
-    /// Donde y cuando se pulso, en pixeles de la region grabada.
-    ///
-    /// Se anota SIEMPRE, se haya pedido marcar los clics o no, porque de aqui sale el zoom
-    /// que se calcula **al exportar**: quien graba no tiene que decidir antes de grabar si
-    /// va a querer que la camara se acerque. Son doce bytes por clic.
-    #[serde(default)]
-    pub clics: Vec<crate::encode::zoom::Clic>,
-    /// Los atajos que se pulsaron, con su texto ya escrito para leerse.
-    ///
-    /// Se anotan igual que los clics y por lo mismo: la pastilla se dibuja **al exportar**,
-    /// asi que quien graba no tiene que decidir antes si va a querer ensennarlos.
-    ///
-    /// **Solo atajos con modificador, nunca una tecla suelta.** Es la regla de seguridad de
-    /// `teclas.rs`, y aqui pesa mas todavia: esto se ESCRIBE EN UN ARCHIVO. Una contrasenna
-    /// tecleada durante la grabacion no puede acabar en el disco, y no puede porque una
-    /// contrasenna no lleva Ctrl delante.
-    #[serde(default)]
-    pub teclas: Vec<teclas::Atajo>,
-    /// Donde estaba el raton en cada fotograma, en pixeles de la region grabada.
-    ///
-    /// Un par de enteros por fotograma: a 30 fps, un minuto son 14 KB. Con esto el cursor
-    /// se puede dibujar **al exportar**, del tamanno que se pida, en vez de venir cocido
-    /// del tamanno que tenga Windows puesto.
-    #[serde(default)]
-    pub cursor: Vec<(u64, i32, i32)>,
-    /// Si el cursor de Windows quedo dentro de los fotogramas.
-    ///
-    /// Lo necesita el editor para avisar: con el cursor cocido, encender el dibujado deja
-    /// DOS punteros en el video, y eso parece un fallo del programa.
-    #[serde(default)]
-    pub cursor_capturado: bool,
-    /// Que forma tenia el puntero y desde cuando: `(ms, forma)`, solo cuando cambia.
-    ///
-    /// Va aparte del rastro y solo con los cambios porque casi nunca cambia: un minuto de
-    /// grabacion son un punnado de entradas. Vacio en las grabaciones de antes de esto, que
-    /// se dibujan con la flecha siempre. Las formas son las de `encode::cursor::Forma`.
-    #[serde(default)]
-    pub formas: Vec<(u64, u8)>,
-    /// Las imagenes de verdad de los punteros que hubo puestos, leidas de Windows al
-    /// grabar y guardadas como PNG en la carpeta de la sesion. Ver `punteros.rs`.
-    #[serde(default)]
-    pub punteros: Vec<PunteroGrabado>,
-    /// Que puntero de `punteros` estaba puesto y desde cuando: `(ms, id)`, solo al cambiar.
-    /// `u32::MAX` es «uno que no se pudo leer»: se dibuja la flecha de siempre.
-    #[serde(default)]
-    pub cambios_puntero: Vec<(u64, u32)>,
     pub frames: Vec<FrameEntry>,
 }
 
@@ -216,7 +144,6 @@ pub struct FrameCache {
 impl FrameCache {
     pub fn new(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
-        std::fs::create_dir_all(dir.join("thumbs"))?;
         Self::en_archivo(&dir.join("frames.bin"))
     }
 
@@ -271,7 +198,8 @@ impl FrameCache {
         let recortar = zonas
             .filter(|_| self.desde_entero + 1 < FOTOGRAMA_ENTERO_CADA)
             .filter(|zonas| {
-                (zonas.iter().map(Parche::pixeles).sum::<u64>() as f64) < entero as f64 * PARTE_MAXIMA
+                (zonas.iter().map(Parche::pixeles).sum::<u64>() as f64)
+                    < entero as f64 * PARTE_MAXIMA
             });
 
         let (escrito, patch, parches) = match recortar {
@@ -279,7 +207,11 @@ impl FrameCache {
                 let mut escrito = 0usize;
                 let mut parches = Vec::with_capacity(zonas.len());
                 for zona in &zonas {
-                    let encoded = qoi::encode_to_vec(delta::recortar(rgba, width, *zona), zona.width, zona.height)?;
+                    let encoded = qoi::encode_to_vec(
+                        delta::recortar(rgba, width, *zona),
+                        zona.width,
+                        zona.height,
+                    )?;
                     self.file.write_all(&encoded)?;
                     escrito += encoded.len();
                     parches.push(Trozo {
@@ -300,7 +232,6 @@ impl FrameCache {
             index: self.entries.len() as u32,
             timestamp_ms: ts_ms,
             duration_ms: 0,
-            thumb_path: String::new(),
             offset: self.offset,
             len: escrito as u32,
             patch,
@@ -398,7 +329,6 @@ struct LectorFotogramas<'a> {
     file: &'a mut File,
     buffer: Vec<u8>,
 }
-
 
 impl<'a> LectorFotogramas<'a> {
     fn new(file: &'a mut File) -> Self {
@@ -619,80 +549,6 @@ pub fn read_frame(session: &SessionData, index: usize) -> Result<RgbaImage> {
         .ok_or_else(|| AppError::Msg("Corrupt frame in cache".into()))
 }
 
-/// Genera las miniaturas de la tira de tiempo. Se hace en paralelo porque es
-/// lo unico que separa al usuario del editor cuando para la grabacion.
-pub fn generate_thumbnails(session: &mut SessionData) -> Result<()> {
-    let dir = session.dir.join("thumbs");
-    std::fs::create_dir_all(&dir)?;
-    let cache_path = session.cache_path();
-    let ratio = THUMB_HEIGHT as f32 / session.height.max(1) as f32;
-    let thumb_width = ((session.width as f32 * ratio).round() as u32).max(1);
-
-    // Ya no vale sacar cada miniatura por su cuenta: un fotograma guardado a parches
-    // necesita los de delante. Se reparte por GRUPOS, cada uno empezando en un fotograma
-    // entero, y dentro del grupo se va reconstruyendo en orden. Asi se sigue usando toda
-    // la maquina, que es lo unico que separa a Munir del editor al parar de grabar.
-    let mut grupos: Vec<Vec<FrameEntry>> = Vec::new();
-    for entry in &session.frames {
-        if entry.patch.is_none() || grupos.is_empty() {
-            grupos.push(Vec::new());
-        }
-        grupos
-            .last_mut()
-            .expect("acabamos de meter uno")
-            .push(entry.clone());
-    }
-
-    let results: Vec<Result<()>> = grupos
-        .par_iter()
-        .map(|grupo| -> Result<()> {
-            let destinos: Vec<PathBuf> = grupo
-                .iter()
-                .map(|f| dir.join(format!("{:06}.png", f.index)))
-                .collect();
-            if destinos.iter().all(|p| p.exists()) {
-                return Ok(());
-            }
-            let mut file = File::open(&cache_path)?;
-            let mut lector = LectorFotogramas::new(&mut file);
-            let mut ancho = 0u32;
-            let mut alto = 0u32;
-            let mut lienzo: Vec<u8> = Vec::new();
-            for (entry, destino) in grupo.iter().zip(destinos) {
-                // Hay que pasar por todos aunque su miniatura ya exista: el siguiente
-                // fotograma se apoya en este.
-                lector.aplicar_en(entry, &mut ancho, &mut alto, &mut lienzo)?;
-                if destino.exists() {
-                    continue;
-                }
-                // El lienzo se presta a la imagen y se recupera despues, sin copiarlo:
-                // son ocho megabytes por fotograma a 1080p.
-                let image = RgbaImage::from_raw(ancho, alto, std::mem::take(&mut lienzo))
-                    .ok_or_else(|| AppError::Msg("miniatura corrupta".into()))?;
-                // En dos pasos y no con `image::imageops::resize`: aquel tardaba unos 30 ms
-                // por miniatura a 1080p, y con novecientos fotogramas eran seis segundos
-                // mirando una ventana en blanco antes de que abriera el editor.
-                let thumb = crate::encode::escalar::miniatura(&image, thumb_width, THUMB_HEIGHT);
-                lienzo = image.into_raw();
-                thumb.save(destino)?;
-            }
-            Ok(())
-        })
-        .collect();
-
-    for result in results {
-        result?;
-    }
-
-    for frame in session.frames.iter_mut() {
-        frame.thumb_path = dir
-            .join(format!("{:06}.png", frame.index))
-            .to_string_lossy()
-            .to_string();
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,34 +628,31 @@ mod tests {
             height,
             mp4_path: None,
             audio: None,
-            clics: Vec::new(),
-            teclas: Vec::new(),
-            cursor: Vec::new(),
-            cursor_capturado: false,
-            formas: Vec::new(),
-            punteros: Vec::new(),
-            cambios_puntero: Vec::new(),
             frames,
         }
     }
 
-    /// Lo unico que no se puede negociar: lo que se lee tiene que ser exactamente lo que
-    /// se grabo, fotograma a fotograma. Si esto falla, el editor ensenna basura y el video
-    /// exportado sale mal, y ademas no se notaria hasta que alguien mirase el resultado.
     #[test]
     fn lo_que_se_lee_es_exactamente_lo_que_se_grabo() {
         let (ancho, alto, cuantos) = (64u32, 40u32, 75usize);
         let dir = carpeta("ida-y-vuelta");
-        let originales: Vec<Vec<u8>> = (0..cuantos as u32).map(|i| pantalla(ancho, alto, i)).collect();
+        let originales: Vec<Vec<u8>> = (0..cuantos as u32)
+            .map(|i| pantalla(ancho, alto, i))
+            .collect();
 
         let mut cache = FrameCache::new(&dir).expect("no se ha podido crear la caché");
         for (i, frame) in originales.iter().enumerate() {
             let guardado = cache
                 .push_rgba(frame, ancho, alto, i as u64 * 33)
                 .expect("no se ha podido escribir");
-            assert!(guardado, "el fotograma {i} tenía que entrar, no es igual al anterior");
+            assert!(
+                guardado,
+                "el fotograma {i} tenía que entrar, no es igual al anterior"
+            );
         }
-        let entries = cache.finish(cuantos as u64 * 33, 30).expect("no se ha cerrado");
+        let entries = cache
+            .finish(cuantos as u64 * 33, 30)
+            .expect("no se ha cerrado");
         let sesion = sesion_de(&dir, entries, ancho, alto);
 
         for (i, original) in originales.iter().enumerate() {
@@ -821,7 +674,9 @@ mod tests {
         let dir = carpeta("por-delante");
         let mut cache = FrameCache::new(&dir).unwrap();
         for i in 0..cuantos as u32 {
-            cache.push_rgba(&pantalla(ancho, alto, i), ancho, alto, u64::from(i) * 33).unwrap();
+            cache
+                .push_rgba(&pantalla(ancho, alto, i), ancho, alto, u64::from(i) * 33)
+                .unwrap();
         }
         let entries = cache.finish(cuantos as u64 * 33, 30).unwrap();
         let sesion = sesion_de(&dir, entries, ancho, alto);
@@ -830,12 +685,19 @@ mod tests {
         let indices: Vec<usize> = (0..cuantos).step_by(2).collect();
         let mut lector = LectorPorDelante::nuevo(sesion.clone(), indices.clone());
         for &i in &indices {
-            assert_eq!(lector.en(i).unwrap().as_raw(), read_frame(&sesion, i).unwrap().as_raw(), "fotograma {i}");
+            assert_eq!(
+                lector.en(i).unwrap().as_raw(),
+                read_frame(&sesion, i).unwrap().as_raw(),
+                "fotograma {i}"
+            );
         }
 
         let mut torcido = LectorPorDelante::nuevo(sesion.clone(), vec![0, 1, 2]);
         assert!(torcido.en(0).is_ok());
-        assert!(torcido.en(2).is_err(), "pedir el 2 cuando toca el 1 tiene que fallar");
+        assert!(
+            torcido.en(2).is_err(),
+            "pedir el 2 cuando toca el 1 tiene que fallar"
+        );
 
         // Y con la transformacion en el hilo de lectura.
         let mut chico = LectorPorDelante::nuevo_con(sesion.clone(), vec![3, 4], |f| {
@@ -864,11 +726,19 @@ mod tests {
         cache.push_rgba(&con_dos, ancho, alto, 33).unwrap();
         let de_las_zonas = cache.bytes_written() - antes;
         let entries = cache.finish(66, 30).unwrap();
-        assert_eq!(entries[1].parches.len(), 2, "tenian que ser dos zonas: {:?}", entries[1].parches);
+        assert_eq!(
+            entries[1].parches.len(),
+            2,
+            "tenian que ser dos zonas: {:?}",
+            entries[1].parches
+        );
         assert!(entries[1].patch.is_some(), "no es un fotograma entero");
         // La caja envolvente medi­ria casi toda la pantalla; dos zonas de un pixel son dos
         // cabeceras de QOI y poco mas.
-        assert!(de_las_zonas < 200, "dos pixeles han ocupado {de_las_zonas} bytes");
+        assert!(
+            de_las_zonas < 200,
+            "dos pixeles han ocupado {de_las_zonas} bytes"
+        );
 
         let sesion = sesion_de(&dir, entries, ancho, alto);
         assert_eq!(read_frame(&sesion, 1).unwrap().as_raw(), &con_dos);
@@ -985,7 +855,11 @@ mod tests {
             .filter(|e| e.patch.is_none())
             .map(|e| e.index)
             .collect();
-        assert_eq!(enteros, vec![0, 30, 60], "los enteros no caen donde deberían");
+        assert_eq!(
+            enteros,
+            vec![0, 30, 60],
+            "los enteros no caen donde deberían"
+        );
     }
 
     /// Windows no manda fotograma mientras la pantalla no cambia, asi que un minuto de
@@ -1004,7 +878,10 @@ mod tests {
         let frames = cache.finish(60_000, 30).expect("no se ha cerrado");
         let total: u64 = frames.iter().map(|f| u64::from(f.duration_ms)).sum();
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(total, 60_000, "se han grabado sesenta segundos y el video dura {total} ms");
+        assert_eq!(
+            total, 60_000,
+            "se han grabado sesenta segundos y el video dura {total} ms"
+        );
     }
 
     /// Lo mismo a mitad: dieciseis segundos sin un fotograma son dieciseis segundos de
@@ -1021,6 +898,9 @@ mod tests {
         }
         let frames = cache.finish(16_150, 30).expect("no se ha cerrado");
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(frames[1].duration_ms, 16_000, "el tramo quieto ha perdido tiempo");
+        assert_eq!(
+            frames[1].duration_ms, 16_000,
+            "el tramo quieto ha perdido tiempo"
+        );
     }
 }

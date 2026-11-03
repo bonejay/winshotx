@@ -25,8 +25,6 @@ const AJUSTES = {
   captureCursor: true,
   recordAudio: false,
   recordMicrophone: false,
-  highlightClicks: false,
-  highlightKeys: false,
 } as unknown as Settings;
 
 const PAYLOAD: OverlayPayload = {
@@ -214,40 +212,6 @@ describe("el interruptor de la barra de acciones", () => {
   });
 });
 
-describe("la tecla que captura y abre el editor", () => {
-  /**
-   * Quien pulsa esa tecla ya sabe que va a anotar, asi que pararse en la barra a elegir
-   * «editar» seria un clic de mas. Y manda sobre el perfil: aunque la barra este
-   * encendida, esta captura no la ensenna.
-   */
-  it("al soltar el recorte se va al editor, sin pasar por la barra", async () => {
-    responde("overlay_bootstrap", { ...PAYLOAD, intent: "edit" });
-    const lienzo = await abrir();
-    emite(EVENTS.overlayMode, { mode: "still", fullScreen: false, withToolbar: true });
-
-    arrastrar(lienzo, { x: 200, y: 300 }, { x: 500, y: 500 });
-
-    await waitFor(() =>
-      expect(llamadas.some((l) => l.comando === "capture_still")).toBe(true),
-    );
-    const accion = (
-      llamadas.find((l) => l.comando === "capture_still")?.args as { action: string }
-    ).action;
-    expect(accion).toBe("edit");
-    expect(screen.queryByLabelText("Copy")).toBeNull();
-  });
-
-  /** Y la tecla de siempre sigue sacando la barra: no se le ha quitado nada a nadie. */
-  it("y el atajo de siempre sigue sacando la barra", async () => {
-    const lienzo = await abrir();
-    emite(EVENTS.overlayMode, { mode: "still", fullScreen: false, withToolbar: true });
-
-    arrastrar(lienzo, { x: 200, y: 300 }, { x: 500, y: 500 });
-
-    expect(await screen.findByLabelText("Copy")).toBeInTheDocument();
-    expect(llamadas.some((l) => l.comando === "capture_still")).toBe(false);
-  });
-});
 
 describe("la lupa no se pone encima de lo que estas mirando", () => {
   /**
@@ -381,7 +345,7 @@ describe("la pantalla entera con la barra puesta", () => {
     fireEvent.pointerUp(window, { clientX: 400, clientY: 300 });
 
     await waitFor(() => expect(screen.getByLabelText("Copy")).toBeDefined());
-    expect(screen.getByLabelText("Edit")).toBeDefined();
+    expect(screen.queryByLabelText("Edit")).toBeNull();
     expect(llamadas.some((l) => l.comando === "capture_still")).toBe(false);
   });
 
@@ -439,4 +403,19 @@ describe("solo la pantalla del ratón pinta la interfaz", () => {
     fireEvent.pointerMove(lienzo, { clientX: 400, clientY: 300 });
     expect(screen.getByLabelText("Photo")).toBeTruthy();
   });
+});
+
+it("opens the screenshot menu with the saved window target selected", async () => {
+  responde("overlay_bootstrap", { ...PAYLOAD, settings: { ...AJUSTES, captureTarget: "window" } });
+  await abrir();
+  expect(screen.getByLabelText("Photo")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByLabelText("Window")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByLabelText("Edit")).toBeNull();
+});
+it("opens the video menu with full-screen selection selected", async () => {
+  responde("overlay_bootstrap", { ...PAYLOAD, intent: "record", settings: { ...AJUSTES, recordTarget: "screen" } });
+  await abrir();
+  expect(screen.getByLabelText("Video")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByLabelText("Whole screen")).toHaveAttribute("aria-pressed", "true");
+  expect(llamadas.some(l => l.comando === "start_recording")).toBe(false);
 });

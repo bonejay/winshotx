@@ -6,8 +6,6 @@ use tauri::{AppHandle, Manager, State};
 use crate::capture::{self, MonitorInfo, Rect, WindowRect};
 use crate::encode::{ffmpeg, png};
 use crate::error::{AppError, Result};
-use crate::exporter::{self, ExportRequest, ExportResult};
-use crate::record;
 use crate::recorder::{self, RecordOptions, SessionInfo};
 use crate::settings::Settings;
 use crate::state::AppState;
@@ -55,18 +53,12 @@ pub fn build_overlay_payload(state: &AppState, monitor_id: u32) -> Result<Overla
         // las capturas lleguen en dos tandas (primero la del raton) y `freezes` no este
         // completo todavia.
         screen_number: freeze.monitor.id as usize + 1,
-        screen_count: capture::monitors().map(|m| m.len()).unwrap_or(freezes.len()).max(1),
+        screen_count: capture::monitors()
+            .map(|m| m.len())
+            .unwrap_or(freezes.len())
+            .max(1),
         last_region: *state.last_region.read(),
     })
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FrameDto {
-    index: u32,
-    timestamp_ms: u64,
-    duration_ms: u32,
-    thumb_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,7 +71,10 @@ pub struct StillResult {
 }
 
 #[tauri::command]
-pub async fn overlay_bootstrap(state: State<'_, AppState>, monitor_id: u32) -> Result<OverlayPayload> {
+pub async fn overlay_bootstrap(
+    state: State<'_, AppState>,
+    monitor_id: u32,
+) -> Result<OverlayPayload> {
     build_overlay_payload(&state, monitor_id)
 }
 
@@ -147,11 +142,6 @@ pub async fn capture_still(app: AppHandle, region: Rect, action: String) -> Resu
     entregar(&app, image, region, &action)
 }
 
-/// Se lleva las pantallas de golpe, todas en una imagen, cada una en su sitio real.
-///
-/// No pasa por `capture_still` porque ahi la region decide **de que pantalla** se recorta,
-/// y aqui no hay una pantalla: hay todas. La region que sale es el escritorio virtual
-/// entero, y es la que se guarda en la sesion si se abre el editor.
 #[tauri::command]
 pub async fn capture_all_screens(app: AppHandle, action: String) -> Result<StillResult> {
     let (image, region) = {
@@ -162,9 +152,6 @@ pub async fn capture_all_screens(app: AppHandle, action: String) -> Result<Still
     entregar(&app, image, region, &action)
 }
 
-/// Que se hace con una imagen ya recortada: copiarla, guardarla o abrirla en el editor.
-/// Lo comparten la captura de una region y la de todas las pantallas, que solo se
-/// diferencian en como consiguen la imagen.
 fn entregar(
     app: &AppHandle,
     image: image::RgbaImage,
@@ -225,21 +212,13 @@ fn entregar(
             }
             result.path = Some(path.to_string_lossy().to_string());
         }
-        "edit" => {
-            let session = recorder::session_from_image(app, &image, region)?;
-            windows_mgr::close_overlays(app);
-            windows_mgr::open_editor(app, &session.id)?;
-            return Ok(result);
-        }
         // Copiar el TEXTO en vez de la imagen. Se lee con el motor que trae Windows, asi
         // que no engorda el instalador ni sale de la maquina.
         "text" => {
             let bytes = png::to_bytes(&image)?;
             let texto = crate::platform::ocr::leer_texto(&bytes)?;
             if texto.is_empty() {
-                return Err(AppError::Msg(
-                    "I found no text in that shot.".into(),
-                ));
+                return Err(AppError::Msg("I found no text in that shot.".into()));
             }
             crate::platform::clipboard::copy_text(&texto)?;
             result.copied = true;
@@ -363,7 +342,13 @@ pub async fn copy_pinned(app: AppHandle, path: String) -> Result<()> {
 #[tauri::command]
 pub async fn save_pinned(app: AppHandle, path: String) -> Result<String> {
     let origen = ruta_de_anclada(&app, path)?;
-    let directory = PathBuf::from(app.state::<AppState>().settings.read().save_directory.clone());
+    let directory = PathBuf::from(
+        app.state::<AppState>()
+            .settings
+            .read()
+            .save_directory
+            .clone(),
+    );
     let destino = crate::archivos::destino(&directory, "png")?;
     std::fs::copy(&origen, &destino)?;
     Ok(destino.to_string_lossy().to_string())
@@ -380,9 +365,7 @@ pub async fn pinned_text(app: AppHandle, path: String) -> Result<()> {
     let bytes = std::fs::read(&path)?;
     let texto = crate::platform::ocr::leer_texto(&bytes)?;
     if texto.is_empty() {
-        return Err(AppError::Msg(
-            "I found no text in that shot.".into(),
-        ));
+        return Err(AppError::Msg("I found no text in that shot.".into()));
     }
     crate::platform::clipboard::copy_text(&texto)?;
     Ok(())
@@ -405,9 +388,7 @@ pub async fn copy_color(color: String) -> Result<()> {
 
 /// Un `#rrggbb` y nada mas: almohadilla y seis digitos hexadecimales.
 fn es_un_color(texto: &str) -> bool {
-    texto.len() == 7
-        && texto.starts_with('#')
-        && texto[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    texto.len() == 7 && texto.starts_with('#') && texto[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -456,13 +437,13 @@ pub async fn start_recording(
     options: RecordOptions,
 ) -> Result<SessionInfo> {
     if options.format != "video" {
-        return Err(AppError::Msg("Only video recording is supported in this edition.".into()));
+        return Err(AppError::Msg(
+            "Only video recording is supported in this edition.".into(),
+        ));
     }
     recorder::start(&app, region, options)
 }
 
-/// Vuelve enseguida: lo que tarda (miniaturas, editor o archivo) pasa por detras, y la
-/// barra se entera por el ultimo tick, que llega con `saving`.
 #[tauri::command]
 pub async fn stop_recording(app: AppHandle) -> Result<()> {
     recorder::stop(&app)
@@ -476,145 +457,6 @@ pub async fn pause_recording(app: AppHandle, paused: bool) -> Result<()> {
 #[tauri::command]
 pub async fn cancel_recording(app: AppHandle) -> Result<()> {
     recorder::cancel(&app)
-}
-
-fn session_of(app: &AppHandle, session_id: &str) -> Result<record::SessionData> {
-    let state = app.state::<AppState>();
-    let sessions = state.sessions.read();
-    sessions
-        .get(session_id)
-        .cloned()
-        .ok_or_else(|| AppError::UnknownSession(session_id.to_string()))
-}
-
-#[tauri::command]
-pub async fn session_info(app: AppHandle, session_id: String) -> Result<SessionInfo> {
-    Ok(SessionInfo::from(&session_of(&app, &session_id)?))
-}
-
-#[tauri::command]
-pub async fn session_frames(app: AppHandle, session_id: String) -> Result<Vec<FrameDto>> {
-    Ok(session_of(&app, &session_id)?
-        .frames
-        .into_iter()
-        .map(|frame| FrameDto {
-            index: frame.index,
-            timestamp_ms: frame.timestamp_ms,
-            duration_ms: frame.duration_ms,
-            thumb_path: frame.thumb_path,
-        })
-        .collect())
-}
-
-/// Lo que se anoto al grabar y de lo que sale el estudio: clics, atajos y el rastro del
-/// raton. La vista previa del editor lo dibuja en vivo encima del video, para que el zoom,
-/// los aros y el puntero se vean ANTES de exportar y no solo en el archivo.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioDto {
-    pub clics: Vec<crate::encode::zoom::Clic>,
-    pub teclas: Vec<crate::record::teclas::Atajo>,
-    /// `[ms, x, y]` por fotograma, en pixeles de la region grabada.
-    pub cursor: Vec<(u64, i32, i32)>,
-    /// `[ms, forma]` cada vez que el puntero cambio de forma: 0 flecha, 1 texto, 2 mano.
-    pub formas: Vec<(u64, u8)>,
-    /// Las imagenes de verdad de los punteros, como PNG en la carpeta de la sesion.
-    pub punteros: Vec<record::PunteroGrabado>,
-    /// `[ms, id]` cada vez que cambio el puntero puesto. `4294967295` es uno ilegible.
-    pub cambios_puntero: Vec<(u64, u32)>,
-}
-
-#[tauri::command]
-pub async fn session_studio(app: AppHandle, session_id: String) -> Result<StudioDto> {
-    let session = session_of(&app, &session_id)?;
-    Ok(StudioDto {
-        clics: session.clics,
-        teclas: session.teclas,
-        cursor: session.cursor,
-        formas: session.formas,
-        punteros: session.punteros,
-        cambios_puntero: session.cambios_puntero,
-    })
-}
-
-/// La camara del zoom en cada fotograma, con ese zoom y ese recorte: la misma que usara la
-/// exportacion, para que la vista previa ensenne exactamente lo que va a salir.
-#[tauri::command]
-pub async fn session_camera(
-    app: AppHandle,
-    session_id: String,
-    zoom: f32,
-    crop: Option<crate::encode::recorte::Recorte>,
-) -> Result<Vec<crate::exporter::MuestraCamara>> {
-    let session = session_of(&app, &session_id)?;
-    Ok(crate::exporter::muestras_de_camara(&session, zoom, crop))
-}
-
-#[tauri::command]
-pub async fn frame_image(app: AppHandle, session_id: String, index: usize) -> Result<String> {
-    let session = session_of(&app, &session_id)?;
-    let directory = session.dir.join("full");
-    std::fs::create_dir_all(&directory)?;
-    let path = directory.join(format!("{index:06}.png"));
-    if !path.exists() {
-        let image = record::read_frame(&session, index)?;
-        // Comprimido lo minimo: es una vista previa temporal que se pide en cada
-        // fotograma al que se salta con el raton, y con la compresion de fabrica de
-        // `image` cada salto costaba 180 ms a 1080p. Ver `png::save_fast`.
-        png::save_fast(&image, &path)?;
-    }
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// Lo que se ha tapado y con que marcas, para poder ensennarlo y para poder contarlo.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatosTapados {
-    pub marcas: Vec<crate::encode::anotacion::Anotacion>,
-    /// Cuantos de cada clase, en el orden en que se encontraron: «2 correos, 1 telefono».
-    pub resumen: Vec<(String, usize)>,
-}
-
-/// Cuanto se agranda la caja de una palabra antes de taparla, en veces su alto.
-///
-/// El rectangulo que da el lector es el de las letras, y las letras tienen colas y
-/// acentos que se salen de el. Un mosaico que deja asomar la mitad de una «j» no tapa
-/// nada, y uno que se pasa dos pixeles no molesta a nadie.
-const MARGEN: f32 = 0.18;
-
-/// Busca datos personales en un fotograma y devuelve las marcas que los taparian.
-///
-/// **No cambia nada por su cuenta.** Devuelve las marcas y las annade el editor, que es
-/// quien sabe lo que el usuario ya habia dibujado y quien puede deshacerlas con Ctrl+Z.
-/// Tapar algo a la fuerza en la imagen seria lo unico de la aplicacion que no se puede
-/// deshacer, porque el mosaico borra los pixeles de verdad.
-#[tauri::command]
-pub async fn tapar_datos(app: AppHandle, session_id: String, index: usize) -> Result<DatosTapados> {
-    let session = session_of(&app, &session_id)?;
-    let image = record::read_frame(&session, index)?;
-    let (ancho, alto) = (image.width() as f32, image.height() as f32);
-    let bytes = png::to_bytes(&image)?;
-
-    let lineas = crate::platform::ocr::leer_palabras(&bytes)?;
-    let mut marcas = Vec::new();
-    let mut cuenta: Vec<(String, usize)> = Vec::new();
-    for linea in &lineas {
-        for hallazgo in crate::sensibles::buscar_en_linea(linea) {
-            let Some(marca) = caja_de(linea, &hallazgo.palabras, ancho, alto) else {
-                continue;
-            };
-            marcas.push(marca);
-            let nombre = hallazgo.clase.nombre().to_string();
-            match cuenta.iter_mut().find(|(n, _)| *n == nombre) {
-                Some((_, cuantos)) => *cuantos += 1,
-                None => cuenta.push((nombre, 1)),
-            }
-        }
-    }
-    Ok(DatosTapados {
-        marcas,
-        resumen: cuenta,
-    })
 }
 
 /// Una captura que ya está en el disco, para poder volver a ella sin repetirla.
@@ -638,7 +480,13 @@ pub struct CapturaReciente {
 /// salga: no existe en ninguna parte.
 #[tauri::command]
 pub async fn ultimas_capturas(app: AppHandle, cuantas: usize) -> Result<Vec<CapturaReciente>> {
-    let directory = PathBuf::from(app.state::<AppState>().settings.read().save_directory.clone());
+    let directory = PathBuf::from(
+        app.state::<AppState>()
+            .settings
+            .read()
+            .save_directory
+            .clone(),
+    );
     let Ok(entradas) = std::fs::read_dir(&directory) else {
         // Que la carpeta no exista todavía no es un error: es que no se ha guardado nada.
         return Ok(Vec::new());
@@ -681,68 +529,17 @@ pub async fn copiar_captura(path: String) -> Result<()> {
     crate::platform::clipboard::copy_image(&image, &bytes)
 }
 
-/// Copia al portapapeles el texto que hay en el fotograma que se está viendo.
-///
-/// La tecla `T` ya hacía esto **en la captura**, antes de llegar al editor, y ahí se
-/// quedaba: una vez dentro, para copiar un trozo de texto de la imagen había que salir,
-/// capturar otra vez el mismo sitio y pulsar `T`. Y en una grabación no había forma
-/// ninguna, porque de un vídeo no se sale a capturar el fotograma que acabas de ver.
 #[tauri::command]
-pub async fn copiar_texto(app: AppHandle, session_id: String, index: usize) -> Result<String> {
-    let session = session_of(&app, &session_id)?;
-    let image = record::read_frame(&session, index)?;
-    let bytes = png::to_bytes(&image)?;
-    let texto = crate::platform::ocr::leer_texto(&bytes)?;
-    if texto.trim().is_empty() {
-        return Err(AppError::Msg("No text was found in this image.".into()));
-    }
-    crate::platform::clipboard::copy_text(&texto)?;
-    Ok(texto)
-}
-
-/// La marca que tapa esas palabras: su caja envolvente, con margen, de 0 a 1.
-fn caja_de(
-    linea: &[crate::sensibles::Palabra],
-    cuales: &[usize],
-    ancho: f32,
-    alto: f32,
-) -> Option<crate::encode::anotacion::Anotacion> {
-    if ancho <= 0.0 || alto <= 0.0 {
-        return None;
-    }
-    let partes: Vec<&crate::sensibles::Palabra> = cuales.iter().filter_map(|i| linea.get(*i)).collect();
-    let primera = partes.first()?;
-    let mut x1 = primera.x;
-    let mut y1 = primera.y;
-    let mut x2 = primera.x + primera.ancho;
-    let mut y2 = primera.y + primera.alto;
-    for p in partes.iter().skip(1) {
-        x1 = x1.min(p.x);
-        y1 = y1.min(p.y);
-        x2 = x2.max(p.x + p.ancho);
-        y2 = y2.max(p.y + p.alto);
-    }
-    let margen = (y2 - y1) * MARGEN;
-    Some(crate::encode::anotacion::Anotacion {
-        kind: "blur".into(),
-        x1: ((x1 - margen) / ancho).clamp(0.0, 1.0),
-        y1: ((y1 - margen) / alto).clamp(0.0, 1.0),
-        x2: ((x2 + margen) / ancho).clamp(0.0, 1.0),
-        y2: ((y2 + margen) / alto).clamp(0.0, 1.0),
-        color: String::new(),
-        text: String::new(),
-    })
-}
-
-#[tauri::command]
-pub async fn export_media(app: AppHandle, request: ExportRequest) -> Result<ExportResult> {
-    exporter::export(&app, request)
-}
-
-#[tauri::command]
-pub async fn ffmpeg_available() -> bool {
-    // Lanzar un proceso puede tardar; por eso vive fuera del hilo de la interfaz.
-    ffmpeg::available()
+pub async fn ffmpeg_available(app: AppHandle, path: Option<String>) -> bool {
+    let executable = path.unwrap_or_else(|| {
+        app.state::<AppState>()
+            .settings
+            .read()
+            .encoding
+            .ffmpeg_path
+            .clone()
+    });
+    ffmpeg::available_at(&executable)
 }
 
 #[derive(Debug, Serialize)]
@@ -781,25 +578,13 @@ pub async fn cache_stats(app: AppHandle) -> Result<CacheStats> {
 pub async fn clear_cache(app: AppHandle) -> Result<CacheStats> {
     let state = app.state::<AppState>();
     let root = state.temp_root.join("sessions");
-    // El editor lee los fotogramas del disco segun los pide: borrarlos con la
-    // ventana abierta la deja mostrando una sesion que ya no existe.
-    if app
-        .webview_windows()
-        .keys()
-        .any(|label| label.starts_with(windows_mgr::EDITOR_LABEL))
-    {
+    if state.is_recording() || state.saving.load(std::sync::atomic::Ordering::SeqCst) > 0 {
         return Err(AppError::Msg(
-            "Close the editor before clearing the cache".into(),
-        ));
-    }
-    if state.is_recording() {
-        return Err(AppError::Msg(
-            "Stop recording before clearing the cache".into(),
+            "Wait for recording and saving to finish before clearing the cache".into(),
         ));
     }
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root)?;
-    state.sessions.write().clear();
     cache_stats(app.clone()).await
 }
 
@@ -826,9 +611,7 @@ pub async fn show_screen_number(app: AppHandle, screen: u32) -> Result<()> {
 /// Como va el anillo de los ultimos segundos: si corre, que pantalla vigila y cuanto lleva
 /// grabado. La interfaz lo pregunta al abrirse; despues se entera por el evento.
 
-
 /// Quedarse con lo ultimo que paso. Es lo mismo que hace la tecla.
-
 
 /// Lleva al usuario a la lista de aplicaciones de Windows, que es donde se quita la
 /// Herramienta de Recortes si quiere que Win+Mayus+S deje de abrirla.
@@ -954,7 +737,10 @@ pub async fn use_win_shift_s(app: AppHandle, enabled: bool) -> Result<bool> {
         }
         // Se anade a lo que hubiera en vez de sustituirlo: quien tuviera otras letras
         // apagadas las conserva.
-        let previas = settings.disabled_hotkeys_restore.clone().unwrap_or_default();
+        let previas = settings
+            .disabled_hotkeys_restore
+            .clone()
+            .unwrap_or_default();
         if !previas.to_uppercase().contains('S') {
             snipping::write_disabled_hotkeys(Some(&format!("{previas}S")))?;
         }
@@ -1037,7 +823,11 @@ pub async fn pick_directory(app: AppHandle) -> Option<String> {
 /// que le habria puesto `archivos`, para que aceptar sin tocar nada de lo mismo que guardar
 /// a secas. Devuelve la ruta entera, o nada si se cancelo. La extension la asegura quien
 /// escribe el archivo: el dialogo deja borrarla.
-fn elegir_donde_guardar(app: &AppHandle, carpeta: &std::path::Path, extension: &str) -> Option<PathBuf> {
+fn elegir_donde_guardar(
+    app: &AppHandle,
+    carpeta: &std::path::Path,
+    extension: &str,
+) -> Option<PathBuf> {
     use tauri_plugin_dialog::DialogExt;
     let sugerido = crate::archivos::destino(carpeta, extension).ok()?;
     let nombre = sugerido.file_name()?.to_string_lossy().to_string();
@@ -1049,22 +839,6 @@ fn elegir_donde_guardar(app: &AppHandle, carpeta: &std::path::Path, extension: &
         .add_filter(extension.to_uppercase(), &[extension])
         .blocking_save_file()?;
     elegido.into_path().ok()
-}
-
-/// «Guardar en…» del editor: el mismo dialogo, y el archivo elegido se le pasa despues a
-/// `export_media` en `file`. Va aparte de exportar porque el dialogo bloquea, y el editor
-/// quiere ensennar la barra de progreso solo cuando de verdad se esta escribiendo.
-#[tauri::command]
-pub async fn pick_save_file(
-    app: AppHandle,
-    extension: String,
-    directory: Option<String>,
-) -> Option<String> {
-    let carpeta = directory
-        .filter(|d| !d.trim().is_empty())
-        .unwrap_or_else(|| app.state::<AppState>().settings.read().save_directory.clone());
-    elegir_donde_guardar(&app, &PathBuf::from(carpeta), &extension)
-        .map(|ruta| ruta.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1088,15 +862,6 @@ pub async fn just_updated(app: AppHandle) -> bool {
 #[tauri::command]
 pub async fn is_store_build() -> bool {
     crate::platform::empaquetado::es_msix()
-}
-
-#[tauri::command]
-pub async fn discard_session(app: AppHandle, session_id: String) -> Result<()> {
-    let state = app.state::<AppState>();
-    if let Some(session) = state.sessions.write().remove(&session_id) {
-        let _ = std::fs::remove_dir_all(&session.dir);
-    }
-    Ok(())
 }
 
 /// El interruptor de la barra de arriba: si al soltar el recorte sale la barra de
@@ -1128,69 +893,64 @@ pub async fn open_settings(app: AppHandle) -> Result<()> {
     windows_mgr::show_settings(&app)
 }
 
-#[cfg(test)]
-mod pruebas_de_tapar {
-    use super::*;
-    use crate::sensibles::Palabra;
-
-    fn palabra(texto: &str, x: f32, y: f32, ancho: f32, alto: f32) -> Palabra {
-        Palabra {
-            texto: texto.into(),
-            x,
-            y,
-            ancho,
-            alto,
-        }
+#[tauri::command]
+pub async fn list_audio_devices() -> Result<Vec<crate::audio_devices::AudioDevice>> {
+    crate::audio_devices::list()
+}
+#[tauri::command]
+pub async fn start_audio_preview(
+    app: AppHandle,
+    system: bool,
+    microphone: bool,
+    system_device: Option<String>,
+    microphone_device: Option<String>,
+) -> Result<String> {
+    let state = app.state::<AppState>();
+    if state.is_recording() {
+        return Err(AppError::Msg(
+            "Stop recording before checking audio levels.".into(),
+        ));
     }
-
-    /// La caja se mide **de 0 a 1 sobre la imagen**, que es como van todas las marcas.
-    ///
-    /// Es donde se cuela un fallo de coordenadas sin que nada falle: una marca en píxeles
-    /// se ve bien en la vista previa de hoy y aparece en otro sitio en cuanto se exporta a
-    /// otro tamaño.
-    #[test]
-    fn la_caja_sale_en_tanto_por_uno_sobre_la_imagen() {
-        // Una palabra de 100 px de ancho en la mitad de una imagen de 1000 x 500.
-        let linea = vec![palabra("hola@example.com", 400.0, 240.0, 200.0, 20.0)];
-        let marca = caja_de(&linea, &[0], 1000.0, 500.0).expect("una marca");
-        assert_eq!(marca.kind, "blur", "lo que tapa es el mosaico, no otra cosa");
-        // El margen es el 18 % del alto de la palabra: 3,6 px arriba y abajo.
-        assert!((marca.x1 - 0.3964).abs() < 0.001, "x1 ha salido {}", marca.x1);
-        assert!((marca.x2 - 0.6036).abs() < 0.001, "x2 ha salido {}", marca.x2);
-        assert!(marca.y1 < 0.48 && marca.y2 > 0.52, "la banda tiene que cubrir la palabra");
+    let id = crate::audio_devices::start(system, microphone, system_device, microphone_device)?;
+    if state.is_recording() {
+        crate::audio_devices::stop(Some(&id));
+        return Err(AppError::Msg(
+            "Recording started; audio level check has ended.".into(),
+        ));
     }
+    Ok(id)
+}
+#[tauri::command]
+pub async fn audio_preview_levels(id: String) -> Result<crate::audio_devices::Levels> {
+    crate::audio_devices::levels(&id)
+}
+#[tauri::command]
+pub async fn stop_audio_preview(id: String) {
+    crate::audio_devices::stop(Some(&id));
+}
 
-    /// Varias palabras son UNA caja: una tarjeta en cuatro grupos se tapa de una pieza, no
-    /// con cuatro mosaicos que dejan ver los huecos de en medio.
-    #[test]
-    fn varias_palabras_se_tapan_con_una_sola_caja() {
-        let linea = vec![
-            palabra("4539", 100.0, 50.0, 40.0, 10.0),
-            palabra("5787", 150.0, 50.0, 40.0, 10.0),
-            palabra("6362", 200.0, 50.0, 40.0, 10.0),
-            palabra("1486", 250.0, 50.0, 40.0, 10.0),
-        ];
-        let marca = caja_de(&linea, &[0, 1, 2, 3], 400.0, 100.0).expect("una marca");
-        assert!(marca.x1 < 0.25, "empieza en la primera cifra: {}", marca.x1);
-        assert!(marca.x2 > 0.72, "y llega hasta la última: {}", marca.x2);
-    }
+#[tauri::command]
+pub async fn ffmpeg_info(
+    app: AppHandle,
+    path: Option<String>,
+) -> crate::encode::ffmpeg::FfmpegInfo {
+    let executable = path.unwrap_or_else(|| {
+        app.state::<AppState>()
+            .settings
+            .read()
+            .encoding
+            .ffmpeg_path
+            .clone()
+    });
+    ffmpeg::info(&executable)
+}
 
-    /// Lo que asoma por el borde se queda dentro: una marca fuera del lienzo no se pinta
-    /// (ver `encode::anotacion`), así que un dato pegado al borde se quedaría sin tapar.
-    #[test]
-    fn una_palabra_pegada_al_borde_no_se_sale_de_la_imagen() {
-        let linea = vec![palabra("600123456", 0.0, 0.0, 120.0, 20.0)];
-        let marca = caja_de(&linea, &[0], 200.0, 100.0).expect("una marca");
-        assert_eq!(marca.x1, 0.0, "el margen no la saca por la izquierda");
-        assert_eq!(marca.y1, 0.0, "ni por arriba");
-        assert!(marca.x2 <= 1.0 && marca.y2 <= 1.0);
-    }
-
-    #[test]
-    fn sin_palabras_no_hay_marca() {
-        assert!(caja_de(&[], &[], 100.0, 100.0).is_none());
-        let linea = vec![palabra("hola", 0.0, 0.0, 10.0, 10.0)];
-        assert!(caja_de(&linea, &[7], 100.0, 100.0).is_none(), "un índice que no existe");
-        assert!(caja_de(&linea, &[0], 0.0, 100.0).is_none(), "una imagen sin ancho");
-    }
+#[tauri::command]
+pub async fn test_encoder(
+    options: crate::settings::EncodingSettings,
+    fps: u32,
+) -> Result<ffmpeg::EncoderCheck> {
+    tauri::async_runtime::spawn_blocking(move || ffmpeg::test_encoding(&options, fps))
+        .await
+        .map_err(|e| AppError::Msg(e.to_string()))?
 }

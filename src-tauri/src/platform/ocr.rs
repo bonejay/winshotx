@@ -54,58 +54,12 @@ pub fn leer_texto(png: &[u8]) -> Result<String> {
     Ok(lineas.join("\n"))
 }
 
-/// Lee la imagen y devuelve sus líneas, cada una con sus palabras y el rectángulo de cada
-/// palabra en píxeles.
-///
-/// Es la misma lectura que `leer_texto`, pero quedándose con lo que aquella tira: dónde
-/// estaba cada palabra. Sin eso se puede copiar el texto de una captura, pero no tapar un
-/// correo, porque no se sabe qué trozo de la imagen hay que cubrir.
-///
-/// Las líneas salen como las ve el motor, de arriba abajo, y las palabras dentro de cada
-/// línea en el orden en que están escritas. Eso importa: un dato partido en trozos (una
-/// tarjeta en grupos de cuatro) solo se reconoce si sus trozos llegan seguidos.
-#[cfg(windows)]
-pub fn leer_palabras(png: &[u8]) -> Result<Vec<Vec<crate::sensibles::Palabra>>> {
-    use windows::Graphics::Imaging::BitmapDecoder;
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
-
-    let flujo = InMemoryRandomAccessStream::new()?;
-    let escritor = DataWriter::CreateDataWriter(&flujo.GetOutputStreamAt(0)?)?;
-    escritor.WriteBytes(png)?;
-    escritor.StoreAsync()?.join()?;
-    escritor.FlushAsync()?.join()?;
-    flujo.Seek(0)?;
-
-    let decodificador = BitmapDecoder::CreateAsync(&flujo)?.join()?;
-    let mapa = decodificador.GetSoftwareBitmapAsync()?.join()?;
-    let resultado = motor()?.RecognizeAsync(&mapa)?.join()?;
-
-    let mut lineas = Vec::new();
-    for linea in resultado.Lines()? {
-        let mut palabras = Vec::new();
-        for palabra in linea.Words()? {
-            let caja = palabra.BoundingRect()?;
-            palabras.push(crate::sensibles::Palabra {
-                texto: palabra.Text()?.to_string_lossy(),
-                x: caja.X,
-                y: caja.Y,
-                ancho: caja.Width,
-                alto: caja.Height,
-            });
-        }
-        if !palabras.is_empty() {
-            lineas.push(palabras);
-        }
-    }
-    Ok(lineas)
-}
-
 /// El motor de OCR, con los idiomas de la persona y el inglés como red.
 #[cfg(windows)]
 fn motor() -> Result<windows::Media::Ocr::OcrEngine> {
+    use windows::core::HSTRING;
     use windows::Globalization::Language;
     use windows::Media::Ocr::OcrEngine;
-    use windows::core::HSTRING;
 
     if let Ok(motor) = OcrEngine::TryCreateFromUserProfileLanguages() {
         return Ok(motor);
@@ -125,11 +79,6 @@ fn motor() -> Result<windows::Media::Ocr::OcrEngine> {
 
 #[cfg(not(windows))]
 pub fn leer_texto(_png: &[u8]) -> crate::error::Result<String> {
-    Err(crate::error::AppError::Unsupported)
-}
-
-#[cfg(not(windows))]
-pub fn leer_palabras(_png: &[u8]) -> crate::error::Result<Vec<Vec<crate::sensibles::Palabra>>> {
     Err(crate::error::AppError::Unsupported)
 }
 
@@ -176,77 +125,11 @@ mod pruebas {
             "las dos líneas han salido pegadas: {texto:?}"
         );
         let (arriba, abajo) = texto.split_once('\n').unwrap();
-        assert!(arriba.to_lowercase().contains("primera"), "arriba: {arriba:?}");
+        assert!(
+            arriba.to_lowercase().contains("primera"),
+            "arriba: {arriba:?}"
+        );
         assert!(abajo.to_lowercase().contains("segunda"), "abajo: {abajo:?}");
-    }
-
-    /// El camino entero de tapar datos: se pinta una pantalla con un correo y un DNI
-    /// dentro, la lee el motor de Windows, y el detector tiene que sacar los dos.
-    ///
-    /// Las dos mitades estaban verdes por separado (el lector lee, y el detector detecta
-    /// sobre palabras escritas a mano), y eso no es la función hecha: entre las dos hay
-    /// una pantalla de verdad, un motor que parte las palabras donde quiere y una
-    /// puntuación que llega pegada. Esto es lo único que dice si funciona.
-    #[test]
-    #[ignore = "necesita el lector de texto de Windows instalado"]
-    fn el_camino_entero_de_tapar_datos() {
-        let png = pintar_lineas(
-            &[
-                "Factura 2026-104 por 1.234,56 euros",
-                "Contacto: munir@example.com",
-                "DNI 12345678Z telefono 600123456",
-            ],
-            900,
-            320,
-        );
-        let lineas = leer_palabras(&png).expect("el motor de OCR");
-        println!("lineas leidas: {}", lineas.len());
-        let mut clases = Vec::new();
-        for linea in &lineas {
-            let dicho: Vec<&str> = linea.iter().map(|p| p.texto.as_str()).collect();
-            println!("  {:?}", dicho.join(" "));
-            for hallazgo in crate::sensibles::buscar_en_linea(linea) {
-                println!("    -> {} en {:?}", hallazgo.clase.nombre(), hallazgo.palabras);
-                clases.push(hallazgo.clase);
-            }
-        }
-        assert!(
-            clases.contains(&crate::sensibles::Clase::Correo),
-            "no ha encontrado el correo: {clases:?}"
-        );
-        assert!(
-            clases.len() >= 2,
-            "de tres datos en pantalla ha encontrado {}: {clases:?}",
-            clases.len()
-        );
-        // Y lo que no es un dato se queda: la factura y su importe no se tapan.
-        assert!(
-            clases.len() <= 4,
-            "ha encontrado datos de mas, y eso tapa media pantalla: {clases:?}"
-        );
-    }
-
-    /// Las cajas que devuelve el lector tienen que caer DENTRO de la imagen y tener
-    /// tamanno: una caja de cero no tapa nada, y una fuera de la imagen no se pinta.
-    #[test]
-    #[ignore = "necesita el lector de texto de Windows instalado"]
-    fn las_cajas_de_las_palabras_caen_dentro_de_la_imagen() {
-        let (ancho, alto) = (720.0f32, 200.0f32);
-        let png = pintar_lineas(&["winshotx lee donde esta cada palabra"], 720, 200);
-        let lineas = leer_palabras(&png).expect("el motor de OCR");
-        let mut cuantas = 0;
-        for linea in &lineas {
-            for p in linea {
-                assert!(p.ancho > 0.0 && p.alto > 0.0, "caja sin tamanno: {p:?}");
-                assert!(p.x >= 0.0 && p.y >= 0.0, "caja en negativo: {p:?}");
-                assert!(
-                    p.x + p.ancho <= ancho + 1.0 && p.y + p.alto <= alto + 1.0,
-                    "caja fuera de la imagen: {p:?}"
-                );
-                cuantas += 1;
-            }
-        }
-        assert!(cuantas >= 4, "ha leido {cuantas} palabras de seis");
     }
 
     fn escribir_con_gdi(frase: &str, ancho: i32, alto: i32) -> Vec<u8> {
@@ -259,9 +142,9 @@ mod pruebas {
 
     /// Texto negro sobre blanco con la fuente del sistema, devuelto como PNG.
     fn pintar_lineas(lineas: &[&str], ancho: i32, alto: i32) -> Vec<u8> {
+        use windows::core::HSTRING;
         use windows::Win32::Foundation::COLORREF;
         use windows::Win32::Graphics::Gdi::*;
-        use windows::core::HSTRING;
 
         unsafe {
             let dc = CreateCompatibleDC(None);
@@ -291,9 +174,18 @@ mod pruebas {
             // Una letra bien grande: a tamaño de interfaz el OCR también lee, pero una
             // prueba que falla por dos píxeles no dice nada útil.
             let fuente = CreateFontW(
-                64, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                64,
+                0,
+                0,
+                0,
+                FW_NORMAL.0 as i32,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
                 (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
                 &HSTRING::from("Segoe UI"),
             );

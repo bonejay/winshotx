@@ -139,10 +139,10 @@ export function RecorderBar() {
       ) : (
         <span data-tauri-drag-region className="flex items-center gap-1.5">
           <span
-            title={tick.format === "gif" ? t("Animated GIF") : t("MP4 video")}
+            title={t("MP4 video")}
             className="rounded-[5px] border border-white/10 px-1.5 py-0.5 text-[12px] leading-none font-semibold tracking-wide text-neutral-300"
           >
-            {tick.format === "gif" ? "GIF" : "MP4"}
+            {"MP4"}
           </span>
           {tick.audio && (
             <span title={t("System sound being recorded")} aria-label={t("System sound being recorded")} role="img">
@@ -166,6 +166,7 @@ export function RecorderBar() {
         </span>
       )}
 
+      {!guardando && tick.elapsedMs >= 500 && <span className="text-[13px] tabular-nums text-neutral-400" title="Average captured frame rate">{Math.round(tick.frames * 1000 / tick.elapsedMs)} fps</span>}
       <span className="ml-auto flex items-center gap-1">
         <IconButton
           icon={pausa ? Play : Pause}

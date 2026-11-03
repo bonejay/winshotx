@@ -127,6 +127,15 @@ const SEQUIA: Duration = Duration::from_millis(100);
 /// al reanudar llega con su marca de discontinuidad; pero no puede llegar al archivo. La
 /// imagen en pausa no avanza, y el sonido tiene que quedarse en el mismo sitio que ella.
 pub fn empezar(fuentes: Fuentes, pausa: Arc<AtomicBool>) -> Result<Captura> {
+    empezar_con_dispositivos(fuentes, pausa, None, None)
+}
+
+pub fn empezar_con_dispositivos(
+    fuentes: Fuentes,
+    pausa: Arc<AtomicBool>,
+    system_device: Option<String>,
+    microphone_device: Option<String>,
+) -> Result<Captura> {
     let (formato_tx, formato_rx) = mpsc::channel::<Result<Formato>>();
     let (tx, rx) = mpsc::channel::<Trozo>();
     let parar = Arc::new(AtomicBool::new(false));
@@ -135,7 +144,15 @@ pub fn empezar(fuentes: Fuentes, pausa: Arc<AtomicBool>) -> Result<Captura> {
     // Todo el trabajo de COM vive en su propio hilo, del principio al fin: los objetos de
     // audio pertenecen al hilo que los crea y no se pueden pasear por otros.
     let hilo = std::thread::spawn(move || {
-        let resultado = capturar(fuentes, &formato_tx, &tx, &bandera, &pausa);
+        let resultado = capturar(
+            fuentes,
+            &formato_tx,
+            &tx,
+            &bandera,
+            &pausa,
+            system_device.as_deref(),
+            microphone_device.as_deref(),
+        );
         if let Err(error) = resultado {
             // Si falla despues de haber dado el formato, ya no hay a quien contarselo por
             // el canal: se deja escrito y la grabacion sigue, muda.
@@ -161,6 +178,8 @@ fn capturar(
     tx: &Sender<Trozo>,
     parar: &AtomicBool,
     pausa: &AtomicBool,
+    system_device: Option<&str>,
+    microphone_device: Option<&str>,
 ) -> Result<()> {
     // El guardian cierra COM pase lo que pase: sin esto, un error a medio camino deja el
     // hilo con COM inicializado y la siguiente grabacion se encuentra el estropicio.
@@ -175,38 +194,42 @@ fn capturar(
     } else {
         Dispositivo::Microfono
     };
-    let (cliente, captura, formato) = match unsafe { abrir(maestro) } {
+    let (cliente, captura, formato) = match unsafe {
+        abrir_elegido(
+            maestro,
+            if fuentes.sistema {
+                system_device
+            } else {
+                microphone_device
+            },
+        )
+    } {
         Ok(abierto) => abierto,
         Err(error) => {
             let _ = formato_tx.send(Err(error));
             return Ok(());
         }
     };
-    if formato_tx.send(Ok(formato)).is_err() {
-        return Ok(());
-    }
-
-    // El acompannante, si se han pedido los dos. Que falle no para la grabacion: es peor
-    // quedarse sin video por no tener microfono que grabar sin voz.
+    // Both requested sources must open successfully; never silently omit the microphone.
     let mut acompannante = if fuentes.sistema && fuentes.microfono {
-        match unsafe { abrir(Dispositivo::Microfono) } {
-            Ok((cliente_mic, captura_mic, formato_mic)) => {
-                match unsafe { cliente_mic.Start() } {
-                    Ok(()) => Some(Acompannante {
-                        cliente: cliente_mic,
-                        captura: captura_mic,
-                        formato: formato_mic,
-                        pendiente: Vec::new(),
-                    }),
-                    Err(error) => {
-                        eprintln!("[winshotx] el microfono no arranca: {error}");
-                        None
-                    }
+        match unsafe { abrir_elegido(Dispositivo::Microfono, microphone_device) } {
+            Ok((cliente_mic, captura_mic, formato_mic)) => match unsafe { cliente_mic.Start() } {
+                Ok(()) => Some(Acompannante {
+                    cliente: cliente_mic,
+                    captura: captura_mic,
+                    formato: formato_mic,
+                    pendiente: Vec::new(),
+                }),
+                Err(error) => {
+                    let _ = formato_tx.send(Err(AppError::Msg(format!(
+                        "Could not start the selected microphone: {error}"
+                    ))));
+                    return Ok(());
                 }
-            }
+            },
             Err(error) => {
-                eprintln!("[winshotx] sin microfono: {error}");
-                None
+                let _ = formato_tx.send(Err(error));
+                return Ok(());
             }
         }
     } else {
@@ -214,6 +237,14 @@ fn capturar(
     };
 
     unsafe { cliente.Start() }.map_err(|e| AppError::Msg(format!("Could not start audio: {e}")))?;
+
+    if formato_tx.send(Ok(formato)).is_err() {
+        let _ = unsafe { cliente.Stop() };
+        if let Some(microphone) = acompannante.as_ref() {
+            let _ = unsafe { microphone.cliente.Stop() };
+        }
+        return Ok(());
+    }
 
     // El reloj de pared de la grabacion, descontando las pausas. Es el que manda cuando el
     // maestro se calla: ver `SEQUIA`.
@@ -237,10 +268,8 @@ fn capturar(
             let mut datos = std::ptr::null_mut();
             let mut instantes = 0u32;
             let mut banderas = 0u32;
-            unsafe {
-                captura.GetBuffer(&mut datos, &mut instantes, &mut banderas, None, None)
-            }
-            .map_err(|e| AppError::Msg(format!("Could not acquire audio: {e}")))?;
+            unsafe { captura.GetBuffer(&mut datos, &mut instantes, &mut banderas, None, None) }
+                .map_err(|e| AppError::Msg(format!("Could not acquire audio: {e}")))?;
 
             let bytes = instantes as usize * formato.bytes_por_instante() as usize;
             // AUDCLNT_BUFFERFLAGS_SILENT vale 2: Windows dice "aqui no suena nada" y no se
@@ -294,9 +323,11 @@ fn capturar(
         //    llevan los fotogramas.
         if !llego_algo {
             let emitido = formato.duracion(escritos);
-            if let Some(instantes) =
-                instantes_que_faltan(reloj.transcurrido(Instant::now()), emitido, formato.muestras_por_segundo)
-            {
+            if let Some(instantes) = instantes_que_faltan(
+                reloj.transcurrido(Instant::now()),
+                emitido,
+                formato.muestras_por_segundo,
+            ) {
                 let silencio = vec![0u8; instantes * formato.bytes_por_instante() as usize];
                 let _ = emitir(silencio, formato, acompannante.as_mut(), &mut escritos, tx);
             }
@@ -340,7 +371,11 @@ fn emitir(
 /// `None` mientras la diferencia no llegue a `SEQUIA`. Va aparte y sin tocar ningun
 /// aparato para poder probar la cuenta, que es la que decide si el sonido va pegado a la
 /// imagen cuando el altavoz se calla.
-fn instantes_que_faltan(reloj: Duration, emitido: Duration, muestras_por_segundo: u32) -> Option<usize> {
+fn instantes_que_faltan(
+    reloj: Duration,
+    emitido: Duration,
+    muestras_por_segundo: u32,
+) -> Option<usize> {
     let falta = reloj.checked_sub(emitido)?;
     if falta < SEQUIA {
         return None;
@@ -442,10 +477,7 @@ unsafe fn leer_todo(captura: &IAudioCaptureClient, formato: Formato) -> Option<V
         unsafe { captura.GetBuffer(&mut datos, &mut instantes, &mut banderas, None, None) }.ok()?;
         let bytes = instantes as usize * formato.bytes_por_instante() as usize;
         if banderas & 0x2 != 0 || datos.is_null() {
-            todo.extend(std::iter::repeat_n(
-                0.0,
-                bytes / std::mem::size_of::<f32>(),
-            ));
+            todo.extend(std::iter::repeat_n(0.0, bytes / std::mem::size_of::<f32>()));
         } else {
             let crudo = unsafe { std::slice::from_raw_parts(datos, bytes) };
             todo.extend(super::mezcla::como_flotantes(crudo));
@@ -465,9 +497,13 @@ enum Dispositivo {
 }
 
 /// Abre el aparato que se le pida y devuelve con que formato esta trabajando.
-unsafe fn abrir(que: Dispositivo) -> Result<(IAudioClient, IAudioCaptureClient, Formato)> {
-    let enumerador: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-        .map_err(|e| AppError::Msg(format!("Could not enumerate audio devices: {e}")))?;
+unsafe fn abrir_elegido(
+    que: Dispositivo,
+    device_id: Option<&str>,
+) -> Result<(IAudioClient, IAudioCaptureClient, Formato)> {
+    let enumerador: IMMDeviceEnumerator =
+        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+            .map_err(|e| AppError::Msg(format!("Could not enumerate audio devices: {e}")))?;
     // `eRender` es la salida (los altavoces) y `eCapture` la entrada (el microfono).
     // `eConsole` es el uso normal, no el de comunicaciones: es el que sigue al aparato que
     // el usuario tiene puesto en Windows.
@@ -475,9 +511,24 @@ unsafe fn abrir(que: Dispositivo) -> Result<(IAudioClient, IAudioCaptureClient, 
         Dispositivo::Altavoz => (eRender, "speaker"),
         Dispositivo::Microfono => (eCapture, "microphone"),
     };
-    let dispositivo = enumerador
-        .GetDefaultAudioEndpoint(flujo, eConsole)
-        .map_err(|e| AppError::Msg(format!("No default {nombre}: {e}")))?;
+    let dispositivo = match device_id.filter(|id| !id.is_empty()) {
+        Some(id) => {
+            use windows::core::{Interface, HSTRING};
+            use windows::Win32::Media::Audio::IMMEndpoint;
+            let device = enumerador
+                .GetDevice(&HSTRING::from(id))
+                .map_err(|e| AppError::Msg(format!("Could not open the selected {nombre}: {e}")))?;
+            if device.cast::<IMMEndpoint>()?.GetDataFlow()? != flujo {
+                return Err(AppError::Msg(format!(
+                    "The selected device is not a {nombre}."
+                )));
+            }
+            device
+        }
+        None => enumerador
+            .GetDefaultAudioEndpoint(flujo, eConsole)
+            .map_err(|e| AppError::Msg(format!("No default {nombre}: {e}")))?,
+    };
 
     let cliente: IAudioClient = dispositivo
         .Activate(CLSCTX_ALL, None)
@@ -519,10 +570,10 @@ unsafe fn abrir(que: Dispositivo) -> Result<(IAudioClient, IAudioCaptureClient, 
 }
 
 /// COM inicializado mientras viva, y cerrado al soltarlo.
-struct Com;
+pub(crate) struct Com;
 
 impl Com {
-    fn inicializar() -> Result<Self> {
+    pub(crate) fn inicializar() -> Result<Self> {
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
             .ok()
             .map_err(|e| AppError::Msg(format!("Could not prepare audio: {e}")))?;
@@ -628,19 +679,36 @@ mod tests {
         assert_eq!(leidos[1], i16::MAX, "el máximo se va al tope");
         assert_eq!(leidos[2], -i16::MAX, "y el mínimo, al otro tope");
         assert_eq!(leidos[3], i16::MAX / 2, "la mitad, a la mitad");
-        assert_eq!(leidos[4], i16::MAX, "por encima de uno se recorta, no da la vuelta");
+        assert_eq!(
+            leidos[4],
+            i16::MAX,
+            "por encima de uno se recorta, no da la vuelta"
+        );
         assert_eq!(leidos[5], -i16::MAX, "y por debajo de menos uno, igual");
-        assert_eq!(pcm.len(), bytes.len() / 2, "ocupa la mitad, que es el objetivo");
+        assert_eq!(
+            pcm.len(),
+            bytes.len() / 2,
+            "ocupa la mitad, que es el objetivo"
+        );
     }
 
     /// Por debajo de la sequia no se rellena nada: eso es jitter, no silencio.
     #[test]
     fn por_debajo_de_la_sequia_no_se_rellena() {
         let emitido = Duration::from_millis(1_000);
-        assert_eq!(instantes_que_faltan(Duration::from_millis(1_050), emitido, 48_000), None);
-        assert_eq!(instantes_que_faltan(Duration::from_millis(1_099), emitido, 48_000), None);
+        assert_eq!(
+            instantes_que_faltan(Duration::from_millis(1_050), emitido, 48_000),
+            None
+        );
+        assert_eq!(
+            instantes_que_faltan(Duration::from_millis(1_099), emitido, 48_000),
+            None
+        );
         // Y si lo escrito va por delante del reloj, tampoco: no hay nada que rellenar.
-        assert_eq!(instantes_que_faltan(Duration::from_millis(900), emitido, 48_000), None);
+        assert_eq!(
+            instantes_que_faltan(Duration::from_millis(900), emitido, 48_000),
+            None
+        );
     }
 
     /// Con sequia se rellena JUSTO lo que falta hasta el reloj, ni un instante mas: es lo
@@ -705,7 +773,10 @@ mod tests {
     #[ignore = "necesita un altavoz de verdad"]
     fn el_sonido_sigue_llegando_con_el_altavoz_callado() {
         let captura = empezar(
-            Fuentes { sistema: true, microfono: false },
+            Fuentes {
+                sistema: true,
+                microfono: false,
+            },
             Arc::new(AtomicBool::new(false)),
         )
         .expect("no se ha podido abrir el altavoz");
@@ -713,7 +784,10 @@ mod tests {
         std::thread::sleep(Duration::from_secs(3));
         let (mut bytes, mut trozos, mut ultimo_inicio) = (0usize, 0u32, 0i64);
         while let Ok(trozo) = captura.trozos.try_recv() {
-            assert!(trozo.desde_el_inicio >= ultimo_inicio, "el tiempo del sonido va hacia atras");
+            assert!(
+                trozo.desde_el_inicio >= ultimo_inicio,
+                "el tiempo del sonido va hacia atras"
+            );
             ultimo_inicio = trozo.desde_el_inicio;
             bytes += trozo.datos.len();
             trozos += 1;
@@ -736,7 +810,10 @@ mod tests {
     #[ignore = "necesita altavoz y microfono de verdad"]
     fn la_pista_no_se_queda_muda_con_microfono_y_altavoz_callado() {
         let captura = empezar(
-            Fuentes { sistema: true, microfono: true },
+            Fuentes {
+                sistema: true,
+                microfono: true,
+            },
             Arc::new(AtomicBool::new(false)),
         )
         .expect("no se ha podido abrir el sonido");
@@ -749,7 +826,10 @@ mod tests {
         captura.parar();
         let ms = formato.duracion_de(bytes) / 10_000;
         eprintln!("[voz con altavoz callado] {ms} ms de pista en 3 s de reloj");
-        assert!((2_500..=3_300).contains(&ms), "la pista dura {ms} ms y tenia que durar unos 3 s");
+        assert!(
+            (2_500..=3_300).contains(&ms),
+            "la pista dura {ms} ms y tenia que durar unos 3 s"
+        );
     }
 
     /// Abre el microfono de verdad y comprueba que entrega sonido.
@@ -823,13 +903,22 @@ mod tests {
                 formato.duracion_de(bytes),
                 "el trozo mezclado no empieza donde acababa el anterior"
             );
-            assert!(trozo.desde_el_inicio >= ultimo_inicio, "el tiempo va hacia atrás");
+            assert!(
+                trozo.desde_el_inicio >= ultimo_inicio,
+                "el tiempo va hacia atrás"
+            );
             ultimo_inicio = trozo.desde_el_inicio;
             bytes += trozo.datos.len();
         }
         captura.parar();
-        println!("{bytes} bytes mezclados, {:.2} s", bytes as f64 / (48_000.0 * 8.0));
-        assert!(bytes > 0, "no ha llegado sonido de ninguna de las dos fuentes");
+        println!(
+            "{bytes} bytes mezclados, {:.2} s",
+            bytes as f64 / (48_000.0 * 8.0)
+        );
+        assert!(
+            bytes > 0,
+            "no ha llegado sonido de ninguna de las dos fuentes"
+        );
     }
 
     /// La estructura que se le pasa a Windows tiene que ser coherente consigo misma, o el
@@ -846,7 +935,10 @@ mod tests {
         // campos: se copian a variables sueltas antes de compararlos.
         let (canales, bits, alineacion) = (wave.nChannels, wave.wBitsPerSample, wave.nBlockAlign);
         let (por_segundo, muestras) = (wave.nAvgBytesPerSec, wave.nSamplesPerSec);
-        assert_eq!(u32::from(alineacion), u32::from(canales) * u32::from(bits) / 8);
+        assert_eq!(
+            u32::from(alineacion),
+            u32::from(canales) * u32::from(bits) / 8
+        );
         assert_eq!(por_segundo, muestras * u32::from(alineacion));
     }
 }

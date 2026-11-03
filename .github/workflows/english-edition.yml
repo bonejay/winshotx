@@ -27,6 +27,8 @@ jobs:
       - run: cargo check --manifest-path src-tauri/Cargo.toml --tests
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib encode::ffmpeg::tests
       - run: cargo test --manifest-path src-tauri/Cargo.toml --lib english_edition_tests
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib audio_devices::tests
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib pacing_tests
       - run: npm run tauri -- build --no-bundle
       - uses: actions/upload-artifact@v4
         with:

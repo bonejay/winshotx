@@ -34,6 +34,7 @@ export function ShortcutField({ value, onChange, active }: Props) {
     if (!recording) return;
 
     const onKey = (e: KeyboardEvent) => {
+      if (e.type === "keyup" && e.code !== "PrintScreen" && e.key !== "PrintScreen") return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -54,9 +55,9 @@ export function ShortcutField({ value, onChange, active }: Props) {
       if (parts.length === 0) return;
       // Sin código físico, el atajo saldría como "CmdOrCtrl+Shift+" y Windows no puede
       // registrar eso: pasa con el teclado en pantalla y con las teclas automatizadas.
-      if (!e.code) return;
+      if (!e.code && e.key !== "PrintScreen") return;
 
-      parts.push(e.code);
+      parts.push(e.code || e.key);
       // Cerrar ANTES de guardar. Si el guardado se va por el desagüe, el campo se
       // quedaba pidiendo teclas para siempre y parecía que no se había enterado.
       setRecording(false);
@@ -64,7 +65,8 @@ export function ShortcutField({ value, onChange, active }: Props) {
     };
 
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKey, true); };
   }, [recording, onChange]);
 
   useEffect(() => {

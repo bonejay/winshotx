@@ -21,8 +21,6 @@ pub enum AppError {
     Image(#[from] image::ImageError),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("GIF error: {0}")]
-    Gif(#[from] gif::EncodingError),
     #[error("QOI error: {0}")]
     Qoi(#[from] qoi::Error),
     /// Lo que devuelven las APIs modernas de Windows (WinRT), como el lector de texto.

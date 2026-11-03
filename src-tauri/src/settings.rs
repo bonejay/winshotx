@@ -48,6 +48,9 @@ pub enum Theme {
 #[serde(rename_all = "camelCase", default)]
 pub struct EncodingSettings {
     pub engine: String,
+    pub ffmpeg_path: String,
+    pub rate_control: String,
+    pub crf: u8,
     pub encoder: String,
     pub quality: u8,
     pub bitrate_mbps: f64,
@@ -55,10 +58,26 @@ pub struct EncodingSettings {
     pub gpu: String,
     pub extra_args: String,
 }
+fn default_ffmpeg_path() -> String {
+    if let Some(program_files) = std::env::var_os("ProgramFiles(x86)") {
+        let svp = PathBuf::from(program_files)
+            .join("SVP 4")
+            .join("utils")
+            .join("ffmpeg.exe");
+        if svp.is_file() {
+            return svp.to_string_lossy().into_owned();
+        }
+    }
+    "ffmpeg".into()
+}
+
 impl Default for EncodingSettings {
     fn default() -> Self {
         Self {
             engine: "native".into(),
+            ffmpeg_path: default_ffmpeg_path(),
+            rate_control: "crf".into(),
+            crf: 20,
             encoder: "libx264".into(),
             quality: 85,
             bitrate_mbps: 0.0,
@@ -75,26 +94,28 @@ impl EncodingSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CaptureTarget {
+    #[default]
+    Rectangle,
+    Window,
+    Screen,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub encoding: EncodingSettings,
     pub capture_shortcut: String,
+    pub capture_target: CaptureTarget,
+    pub record_target: CaptureTarget,
     pub record_shortcut: String,
     /// La tecla que se queda con lo que ACABA de pasar. Va aparte del atajo de grabar
     /// porque hace lo contrario: aquel decide que se empieza a grabar, y este se lleva algo
     /// que ya se grabo.
     #[serde(default = "atajo_de_repeticion")]
     pub replay_shortcut: String,
-    /// La tecla que captura y abre el editor de una vez, sin pasar por la barra.
-    ///
-    /// Va aparte del atajo de capturar porque no es lo mismo: aquel es para la captura de
-    /// todos los días, que acaba en el portapapeles o en un archivo, y este es para la que
-    /// hay que trabajar (señalar algo, tapar un dato, recortar). Teniendo que elegir
-    /// después en la barra, la captura larga cuesta un clic más justo cuando ya sabes lo
-    /// que quieres.
-    #[serde(default = "atajo_de_editar")]
-    pub edit_shortcut: String,
     pub save_directory: String,
     pub capture_flow: CaptureFlow,
     /// Claro, oscuro, o lo que diga Windows.
@@ -102,18 +123,13 @@ pub struct Settings {
     /// Espannol, ingles, o el idioma de Windows.
     pub language: Language,
     pub copy_after_capture: bool,
-    pub open_editor_after_recording: bool,
     pub capture_cursor: bool,
     pub record_audio: bool,
+    pub system_audio_device: Option<String>,
+    pub microphone_device: Option<String>,
     /// Grabar tambien la voz por el microfono. Con el del sistema puesto, van mezclados.
     #[serde(default)]
     pub record_microphone: bool,
-    /// Marcar cada clic con un aro, para que una grabacion se entienda como tutorial.
-    #[serde(default)]
-    pub highlight_clicks: bool,
-    /// Ensennar los atajos que se pulsan. Solo atajos, nunca una tecla suelta.
-    #[serde(default)]
-    pub highlight_keys: bool,
     pub fps: u32,
     /// Grabar siempre la pantalla en un anillo, para poder quedarse con lo ultimo que paso.
     ///
@@ -181,21 +197,21 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             encoding: EncodingSettings::default(),
+            capture_target: CaptureTarget::Rectangle,
+            record_target: CaptureTarget::Rectangle,
             capture_shortcut: "CmdOrCtrl+Shift+2".into(),
             record_shortcut: "CmdOrCtrl+Shift+5".into(),
             replay_shortcut: atajo_de_repeticion(),
-            edit_shortcut: atajo_de_editar(),
             save_directory: default_save_dir(),
             capture_flow: CaptureFlow::Toolbar,
             theme: Theme::Sistema,
             language: Language::En,
             copy_after_capture: true,
-            open_editor_after_recording: true,
             capture_cursor: true,
             record_audio: false,
+            system_audio_device: None,
+            microphone_device: None,
             record_microphone: false,
-            highlight_clicks: false,
-            highlight_keys: false,
             fps: 30,
             replay_enabled: false,
             replay_seconds: segundos_de_repeticion(),
@@ -233,17 +249,6 @@ fn fps_de_repeticion() -> u32 {
 /// Sigue la serie de las otras dos: capturar es la 2, grabar la 5.
 fn atajo_de_repeticion() -> String {
     "CmdOrCtrl+Shift+6".into()
-}
-
-/// La captura que va al editor, al lado de la de Windows en el teclado.
-///
-/// `Win+Mayús+L` y no una de la serie de los números porque esta es la hermana de
-/// `Win+Mayús+S`: la misma mano, una tecla al lado. `Win+L` sí la tiene cogida el sistema
-/// (bloquear el equipo) y no se puede pedir, pero `Win+Mayús+L` está libre. Si en alguna
-/// máquina no lo estuviera, los ajustes dejan cambiarla, y la app avisa de que no la ha
-/// conseguido en vez de dejar una tecla muerta.
-fn atajo_de_editar() -> String {
-    "Super+Shift+KeyL".into()
 }
 
 fn default_save_dir() -> String {
@@ -320,22 +325,6 @@ pub fn save(app: &AppHandle, settings: &Settings) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Quien actualice desde una version sin la tecla del editor tiene que encontrarsela
-    /// puesta, no vacia: un atajo en blanco no se registra y la funcion no existiria.
-    #[test]
-    fn unos_ajustes_de_antes_de_la_tecla_del_editor_la_traen_de_fabrica() {
-        let viejos = serde_json::json!({
-            "captureShortcut": "Alt+KeyX",
-            "recordShortcut": "Alt+KeyV"
-        });
-        let settings: Settings = serde_json::from_value(viejos).expect("leer los ajustes");
-        assert_eq!(settings.edit_shortcut, "Super+Shift+KeyL");
-        assert_eq!(
-            settings.capture_shortcut, "Alt+KeyX",
-            "y sin pisar lo que habia"
-        );
-    }
 
     /// Un `settings.json` escrito por una version anterior no trae las claves nuevas. Sin
     /// el `default` del contenedor, serde falla ahi y `load` aparta el archivo entero y
@@ -421,11 +410,22 @@ mod english_edition_tests {
         settings.encoding.bitrate_mbps = 12.5;
         settings.encoding.gpu = "1".into();
         settings.encoding.extra_args = r#"["-g", "120"]"#.into();
+        settings.encoding.ffmpeg_path = r"C:\Program Files (x86)\SVP 4\utils\ffmpeg.exe".into();
+        settings.encoding.crf = 18;
+        settings.system_audio_device = Some("speaker-endpoint".into());
+        settings.microphone_device = Some("microphone-endpoint".into());
         let roundtrip: Settings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
         assert_eq!(roundtrip.encoding.encoder, "hevc_nvenc");
         assert_eq!(roundtrip.encoding.bitrate(), Some(12_500_000));
         assert_eq!(roundtrip.encoding.gpu, "1");
         assert_eq!(roundtrip.encoding.extra_args, r#"["-g", "120"]"#);
+        assert_eq!(
+            roundtrip.encoding.ffmpeg_path,
+            settings.encoding.ffmpeg_path
+        );
+        assert_eq!(roundtrip.encoding.crf, 18);
+        assert_eq!(roundtrip.system_audio_device, settings.system_audio_device);
+        assert_eq!(roundtrip.microphone_device, settings.microphone_device);
     }
 }

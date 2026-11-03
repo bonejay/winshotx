@@ -41,11 +41,11 @@ describe("lo que dice la barra", () => {
   it("ensenna el tiempo que manda Rust y el formato", async () => {
     render(<RecorderBar />);
     await act(async () => {
-      emite(EVENTS.recordingTick, tick({ elapsedMs: 83_000, format: "gif" }));
+      emite(EVENTS.recordingTick, tick({ elapsedMs: 83_000, format: "video" }));
     });
     expect(screen.getByRole("timer")).toHaveTextContent("1:23");
-    expect(screen.getByText("GIF")).toBeInTheDocument();
-    expect(screen.queryByText("MP4")).toBeNull();
+    expect(screen.getByText("MP4")).toBeInTheDocument();
+    expect(screen.queryByText("GIF")).toBeNull();
   });
 
   it("solo ensenna el sonido que entra de verdad", async () => {

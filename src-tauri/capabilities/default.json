@@ -4,7 +4,6 @@
   "description": "Permisos minimos: manejo de la propia ventana y eventos.",
   "windows": [
     "main",
-    "editor-*",
     "recorder-*",
     "overlay-*",
     "countdown",

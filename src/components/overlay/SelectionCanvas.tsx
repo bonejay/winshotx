@@ -188,6 +188,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   /** Qué se hará con el recorte. Lo elige la barra de arriba, antes de recortar. */
   const [modo, setModo] = useState<CaptureMode>("still");
   /** Coger la pantalla entera de un clic, sin arrastrar. */
+  const [target, setTarget] = useState<import("../../lib/types").CaptureTarget>("rectangle");
+  const targetRef = useRef(target);
+  targetRef.current = target;
   const [pantallaEntera, setPantallaEntera] = useState(false);
   /**
    * Si al soltar el recorte sale la barra para elegir que hacer con el.
@@ -213,6 +216,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
    */
   const difundir = useCallback((cambio: Partial<OverlayModeState>) => {
     void emit(EVENTS.overlayMode, {
+      target: cambio.target ?? targetRef.current,
       mode: cambio.mode ?? modoRef.current,
       fullScreen: cambio.fullScreen ?? pantallaRef.current,
       withToolbar: cambio.withToolbar ?? conBarraRef.current,
@@ -353,6 +357,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         .catch(() => {});
       // Quien pulsa el atajo de grabar quiere grabar: la barra abre en vídeo y ya.
       setModo(data.intent === "record" ? "video" : "still");
+      const initialTarget = (data.intent === "record" ? data.settings.recordTarget : data.settings.captureTarget) ?? "rectangle";
+      setTarget(initialTarget);
+      setPantallaEntera(initialTarget === "screen");
       setConBarra(data.settings.captureFlow === "toolbar");
       void getCurrentWindow().setFocus();
 
@@ -521,16 +528,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
    */
   const alVuelo = !conBarra;
 
-  /**
-   * Si esta captura se abrio con la tecla del editor.
-   *
-   * Sale del payload y no de un ajuste porque es del DISPARO, no de la configuracion: la
-   * misma persona usa las dos teclas el mismo dia, una para la captura de todos los dias
-   * y otra para la que hay que trabajar.
-   */
-  const alEditor = payload?.intent === "edit";
-  const alEditorRef = useRef(false);
-  alEditorRef.current = alEditor;
+
 
   /**
    * Graba LA VENTANA de debajo del cursor, no el trozo de pantalla donde está.
@@ -549,8 +547,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
           fps: payload.settings.fps,
           audio: payload.settings.recordAudio && format === "video",
           microphone: payload.settings.recordMicrophone && format === "video",
-          highlightClicks: payload.settings.highlightClicks,
-          highlightKeys: payload.settings.highlightKeys,
           window: ventana.hwnd,
         });
       } catch (e) {
@@ -577,8 +573,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
           // El GIF no lleva sonido, asi que el microfono tampoco tiene sentido ahi.
           microphone: payload.settings.recordMicrophone && format === "video",
           // Los aros si valen igual en GIF: el fotograma es el mismo.
-          highlightClicks: payload.settings.highlightClicks,
-          highlightKeys: payload.settings.highlightKeys,
         });
       } catch (e) {
         setError(String(e));
@@ -654,8 +648,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         if (!alVuelo) setSelection(todo);
         else if (modo !== "still") void grabarRegion(todo, modo);
         else void capturarRegion(todo, "copy");
-      } else if (key === "e") {
-        void runStill("edit");
+
       } else if (key === "a") {
         // Anclar. `Ctrl+A` de aqui arriba es otra cosa (toda la pantalla), y no chocan:
         // la letra sola actua sobre el recorte y con Ctrl cambia lo que se recorta.
@@ -789,10 +782,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         // solo se copia sola si ese es el perfil. Si no, sale la barra de la seleccion.
         if (elegido) {
           if (modo !== "still") void grabarRegion(elegido, modo);
-          // La tecla del editor no pregunta: quien la pulsa ya sabe que va a anotar, y
-          // pararse en la barra a elegir «editar» seria un clic de mas en el unico sitio
-          // donde no hace falta decidir nada.
-          else if (alEditor) void capturarRegion(elegido, "edit");
           else if (alVuelo) void capturarRegion(elegido, "copy");
         }
       }
@@ -807,7 +796,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [mode, readHex, alVuelo, alEditor, modo, capturarRegion, grabarRegion]);
+  }, [mode, readHex, alVuelo, modo, capturarRegion, grabarRegion]);
 
   /** Se lleva esta pantalla entera con lo que diga la barra: foto, video o GIF. */
   const llevarsePantalla = useCallback(async () => {
@@ -823,10 +812,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     // la llevaba al portapapeles y cerraba, y la barra no aparecia nunca; `Ctrl+A`, que
     // hace exactamente lo mismo, si la ensennaba. Dos caminos al mismo sitio no pueden
     // acabar en dos sitios distintos. Lo conto Munir el 9 de septiembre de 2026.
-    if (alEditorRef.current) {
-      await capturarRegion(todo, "edit");
-      return;
-    }
     if (conBarraRef.current) {
       setSelection(todo);
       return;
@@ -842,6 +827,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       setModo(p.mode);
       setPantallaEntera(p.fullScreen);
       setConBarra(p.withToolbar);
+      setTarget(p.fullScreen ? "screen" : p.target === "window" ? "window" : "rectangle");
       if (p.fullScreen) setSelection(null);
     });
     const numeros = listen<number>(EVENTS.overlayTakeScreen, ({ payload: n }) => {
@@ -871,6 +857,14 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     }
     const x = e.clientX;
     const y = e.clientY;
+    if (target === "window") {
+      const candidate = windowAt(x, y);
+      if (!candidate) return;
+      setSelection(candidate.rect);
+      if (modo !== "still") void grabarRegion(candidate.rect, modo);
+      else if (alVuelo) void capturarRegion(candidate.rect, "copy");
+      return;
+    }
     const current = selectionRef.current;
     if (current && contains(current, x, y)) {
       setMode({ kind: "moving", grabX: x - current.x, grabY: y - current.y, base: current });
@@ -1035,7 +1029,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       )}
 
       <AnimatePresence>
-        {active && mode.kind === "idle" && !alVuelo && !alEditor && (
+        {active && mode.kind === "idle" && !alVuelo && (
           <FloatingToolbar
             key="toolbar"
             left={clamp(active.x + active.width / 2, 190, window.innerWidth - 190)}
@@ -1046,7 +1040,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
             onCopy={() => void runStill("copy")}
             onSave={() => void runStill("save")}
             onSaveAs={() => void runStill("save_as")}
-            onEdit={() => void runStill("edit")}
             onPin={() => void runStill("pin")}
             onText={() => void runStill("text")}
             onRecord={() => {
@@ -1132,6 +1125,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         <ModeBar
           value={modo}
           onChange={(m) => difundir({ mode: m })}
+          target={target}
+          onTarget={v => { setSelection(null); difundir({ target: v, fullScreen: v === "screen" }); }}
           pantallaEntera={pantallaEntera}
           onPantallaEntera={(v) => difundir({ fullScreen: v })}
           conBarra={conBarra}

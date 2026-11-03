@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use image::{Rgba, RgbaImage};
 use winshotx_lib::capture::{self, Rect};
-use winshotx_lib::encode::{gif as gif_encoder, mp4};
+use winshotx_lib::encode::mp4;
 use winshotx_lib::record::{self, FrameCache};
 
 fn scratch(name: &str) -> PathBuf {
@@ -40,20 +40,14 @@ fn el_cache_deduplica_y_devuelve_los_fotogramas_intactos() {
     let (width, height) = (120u32, 80u32);
 
     let first = synthetic_frame(0, width, height);
-    assert!(cache
-        .push_rgba(first.as_raw(), width, height, 0)
-        .unwrap());
+    assert!(cache.push_rgba(first.as_raw(), width, height, 0).unwrap());
     // El mismo fotograma otra vez no debe ocupar ni un byte mas.
     let bytes_before = cache.bytes_written();
-    assert!(!cache
-        .push_rgba(first.as_raw(), width, height, 33)
-        .unwrap());
+    assert!(!cache.push_rgba(first.as_raw(), width, height, 33).unwrap());
     assert_eq!(cache.bytes_written(), bytes_before);
 
     let second = synthetic_frame(1, width, height);
-    assert!(cache
-        .push_rgba(second.as_raw(), width, height, 66)
-        .unwrap());
+    assert!(cache.push_rgba(second.as_raw(), width, height, 66).unwrap());
 
     let frames = cache.finish(100, 30).unwrap();
     assert_eq!(frames.len(), 2);
@@ -69,68 +63,18 @@ fn el_cache_deduplica_y_devuelve_los_fotogramas_intactos() {
             height,
         },
         fps: 30,
-        format: "gif".into(),
+        format: "video".into(),
         has_audio: false,
         width,
         height,
         mp4_path: None,
         audio: None,
-        clics: Vec::new(),
-        teclas: Vec::new(),
-        cursor: Vec::new(),
-        cursor_capturado: false,
-        formas: Vec::new(),
-        punteros: Vec::new(),
-        cambios_puntero: Vec::new(),
         frames,
     };
 
     let restored = record::read_frame(&session, 1).unwrap();
     assert_eq!(restored.dimensions(), (width, height));
     assert_eq!(restored.as_raw(), second.as_raw(), "QOI no es sin perdida");
-}
-
-#[test]
-fn exporta_un_gif_valido_y_mas_pequenno_que_los_fotogramas_crudos() {
-    let dir = scratch("gif");
-    let (width, height) = (160u32, 120u32);
-    let frames: Vec<RgbaImage> = (0..12).map(|i| synthetic_frame(i, width, height)).collect();
-    let indices: Vec<usize> = (0..frames.len()).collect();
-    let delays = vec![40u32; frames.len()];
-    let path = dir.join("salida.gif");
-
-    let mut loader = |index: usize| Ok(frames[index].clone());
-    gif_encoder::encode(
-        &indices,
-        &delays,
-        &mut loader,
-        &path,
-        &gif_encoder::GifOptions {
-            width,
-            height,
-            quality: 85,
-            loop_forever: true,
-        },
-        |_stage, _done, _total| {},
-    )
-    .expect("el codificador de GIF ha fallado");
-
-    let bytes = std::fs::read(&path).unwrap();
-    assert!(bytes.starts_with(b"GIF89a"), "cabecera de GIF invalida");
-    let crudo = (width * height * 4 * frames.len() as u32) as usize;
-    assert!(bytes.len() < crudo / 4, "el GIF no comprime nada");
-
-    // Se relee con el decodificador para asegurar que no es un archivo roto.
-    let mut options = gif::DecodeOptions::new();
-    options.set_color_output(gif::ColorOutput::Indexed);
-    let mut decoder = options
-        .read_info(std::fs::File::open(&path).unwrap())
-        .expect("el GIF no se puede decodificar");
-    let mut count = 0;
-    while decoder.read_next_frame().unwrap().is_some() {
-        count += 1;
-    }
-    assert!(count >= 2, "se esperaban varios fotogramas, hay {count}");
 }
 
 #[cfg(windows)]
@@ -154,7 +98,8 @@ fn exporta_un_mp4_que_media_foundation_acepta() {
             height,
             fps: 30,
             quality: 70,
-        bitrate_override: None },
+            bitrate_override: None,
+        },
         None,
         |_stage, _done, _total| {},
     )
@@ -173,8 +118,15 @@ fn congela_los_monitores_reales_y_recorta_la_region_pedida() {
 
     let monitor = &freezes[0].monitor;
     assert!(monitor.width > 0 && monitor.height > 0);
-    assert!(freezes[0].png.len() > 1024, "el PNG congelado ha salido vacio");
-    assert_eq!(&freezes[0].png[1..4], b"PNG", "lo que viaja al overlay no es un PNG");
+    assert!(
+        freezes[0].png.len() > 1024,
+        "el PNG congelado ha salido vacio"
+    );
+    assert_eq!(
+        &freezes[0].png[1..4],
+        b"PNG",
+        "lo que viaja al overlay no es un PNG"
+    );
 
     let region = Rect {
         x: monitor.x + 10,
@@ -192,7 +144,7 @@ fn congela_los_monitores_reales_y_recorta_la_region_pedida() {
 #[test]
 fn la_grabacion_en_vivo_entrega_fotogramas_recortados() {
     use std::sync::atomic::{AtomicBool, AtomicU64};
-    use std::sync::mpsc::channel;
+    use std::sync::mpsc::sync_channel;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -207,7 +159,7 @@ fn la_grabacion_en_vivo_entrega_fotogramas_recortados() {
         height: 120,
     };
 
-    let (sender, receiver) = channel();
+    let (sender, receiver) = sync_channel(2);
     let stop = Arc::new(AtomicBool::new(false));
     let control = win::start(
         region,
@@ -220,7 +172,7 @@ fn la_grabacion_en_vivo_entrega_fotogramas_recortados() {
             stop: stop.clone(),
             pause: Arc::new(AtomicBool::new(false)),
             paused_ms: Arc::new(AtomicU64::new(0)),
-            min_interval_ms: 0,
+            min_interval: std::time::Duration::ZERO,
             start: std::time::Instant::now(),
             reciclados: Default::default(),
         },
@@ -251,7 +203,7 @@ fn la_grabacion_en_vivo_entrega_fotogramas_recortados() {
 #[test]
 fn de_la_pantalla_al_gif_y_al_mp4() {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::mpsc::channel;
+    use std::sync::mpsc::sync_channel;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -267,7 +219,7 @@ fn de_la_pantalla_al_gif_y_al_mp4() {
         height: 160,
     };
 
-    let (sender, receiver) = channel();
+    let (sender, receiver) = sync_channel(2);
     let stop = Arc::new(AtomicBool::new(false));
     let control = win::start(
         region,
@@ -280,7 +232,7 @@ fn de_la_pantalla_al_gif_y_al_mp4() {
             stop: stop.clone(),
             pause: Arc::new(AtomicBool::new(false)),
             paused_ms: Arc::new(AtomicU64::new(0)),
-            min_interval_ms: 0,
+            min_interval: std::time::Duration::ZERO,
             start: std::time::Instant::now(),
             reciclados: Default::default(),
         },
@@ -309,54 +261,21 @@ fn de_la_pantalla_al_gif_y_al_mp4() {
     let frames = cache.finish(last_ts + 50, 20).unwrap();
     assert!(!frames.is_empty(), "no se ha cacheado ningun fotograma");
 
-    let mut session = record::SessionData {
+    let session = record::SessionData {
         id: "e2e".into(),
         dir: dir.clone(),
         region,
         fps: 20,
-        format: "gif".into(),
+        format: "video".into(),
         has_audio: false,
         width: region.width,
         height: region.height,
         mp4_path: None,
         audio: None,
-        clics: Vec::new(),
-        teclas: Vec::new(),
-        cursor: Vec::new(),
-        cursor_capturado: false,
-        formas: Vec::new(),
-        punteros: Vec::new(),
-        cambios_puntero: Vec::new(),
         frames,
     };
-    record::generate_thumbnails(&mut session).expect("las miniaturas han fallado");
-    assert!(
-        PathBuf::from(&session.frames[0].thumb_path).exists(),
-        "la miniatura no se ha escrito"
-    );
-    session.persist().unwrap();
-
     let indices: Vec<usize> = (0..session.frames.len()).collect();
     let delays: Vec<u32> = session.frames.iter().map(|f| f.duration_ms).collect();
-
-    let gif_path = dir.join("clip.gif");
-    let mut loader = |index: usize| record::read_frame(&session, index);
-    gif_encoder::encode(
-        &indices,
-        &delays,
-        &mut loader,
-        &gif_path,
-        &gif_encoder::GifOptions {
-            width: region.width / 2,
-            height: region.height / 2,
-            quality: 70,
-            loop_forever: true,
-        },
-        |_, _, _| {},
-    )
-    .expect("no se ha podido exportar el GIF");
-    assert!(std::fs::read(&gif_path).unwrap().starts_with(b"GIF89a"));
-
     let mp4_path = dir.join("clip.mp4");
     let mut loader = |index: usize| record::read_frame(&session, index);
     mp4::encode(
@@ -369,7 +288,8 @@ fn de_la_pantalla_al_gif_y_al_mp4() {
             height: region.height,
             fps: 20,
             quality: 70,
-        bitrate_override: None },
+            bitrate_override: None,
+        },
         None,
         |_, _, _| {},
     )
@@ -420,7 +340,8 @@ fn el_mp4_exportado_lleva_el_sonido_dentro() {
             height: alto,
             fps: 30,
             quality: 70,
-        bitrate_override: None },
+            bitrate_override: None,
+        },
         Some(pista),
         |_, _, _| {},
     )

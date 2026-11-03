@@ -1,14 +1,3 @@
-//! Dónde cae cada archivo que se lleva el usuario, y cómo se llama.
-//!
-//! **Un solo sitio.** Hasta ahora lo decidían tres por su cuenta: guardar una captura desde
-//! la barra, exportar desde el editor y guardar una captura anclada. Tres sitios que hacen
-//! lo mismo son tres sitios que se separan, y ya empezaban a hacerlo.
-//!
-//! Y los tres tenían el mismo fallo: el nombre lleva la hora **al segundo**, y escribir un
-//! PNG sobre uno que ya existe no falla ni avisa. **Dos capturas guardadas dentro del mismo
-//! segundo dejaban una sola**, y la que se perdía era la primera. Con el atajo de teclado
-//! eso no es un caso raro: es lo que pasa al capturar dos veces seguidas.
-
 use std::path::{Path, PathBuf};
 
 /// La hora, al segundo, como se escribe en el nombre de un archivo.
@@ -47,7 +36,11 @@ pub fn nombre_libre(dir: &Path, base: &str, extension: &str) -> PathBuf {
 /// La ruta donde escribir lo siguiente que se guarde, con la carpeta ya creada.
 pub fn destino(dir: &Path, extension: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    Ok(nombre_libre(dir, &format!("winshotx-{}", marca_de_tiempo()), extension))
+    Ok(nombre_libre(
+        dir,
+        &format!("winshotx-{}", marca_de_tiempo()),
+        extension,
+    ))
 }
 
 #[cfg(test)]
@@ -82,7 +75,10 @@ mod tests {
         tocar(&primera);
         let segunda = nombre_libre(&dir, "winshotx-20260827-154810", "png");
         assert_ne!(segunda, primera);
-        assert_eq!(segunda.file_name().unwrap(), "winshotx-20260827-154810-2.png");
+        assert_eq!(
+            segunda.file_name().unwrap(),
+            "winshotx-20260827-154810-2.png"
+        );
         assert!(primera.exists(), "la primera captura ha desaparecido");
     }
 
@@ -123,7 +119,11 @@ mod tests {
         let ruta = destino(&dir, "png").unwrap();
         assert!(dir.exists());
         assert_eq!(ruta.extension().unwrap(), "png");
-        assert!(ruta.file_name().unwrap().to_string_lossy().starts_with("winshotx-"));
+        assert!(ruta
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("winshotx-"));
     }
 
     #[test]

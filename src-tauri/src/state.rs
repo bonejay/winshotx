@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -28,6 +27,7 @@ pub struct Cabecera {
 
 /// Todo lo que hay que compartir con el hilo de captura mientras se graba.
 pub struct RecordingState {
+    pub settings: Settings,
     pub started: Instant,
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
@@ -83,7 +83,6 @@ pub struct AppState {
     pub settings: RwLock<Settings>,
     /// Pantallas congeladas de la captura en curso, una por monitor.
     pub freezes: RwLock<Vec<Freeze>>,
-    pub sessions: RwLock<HashMap<String, SessionData>>,
     pub shortcuts: RwLock<crate::hotkeys::ShortcutStatus>,
     /// Los atajos que hemos pedido al sistema, para poder soltarlos uno a uno.
     /// Sin esta lista hay que fiarse de `unregister_all`, y no se puede: ver hotkeys.rs.
@@ -93,6 +92,7 @@ pub struct AppState {
     /// toca copiar la imagen o empezar a grabar.
     pub intent: RwLock<OverlayIntent>,
     pub recording: Mutex<Option<RecordingState>>,
+    pub saving: Arc<AtomicU64>,
     /// El anillo de los ultimos segundos, si esta encendido. Va aparte de `recording`
     /// porque puede convivir con una grabacion normal: son dos capturas distintas y quien
     /// esta grabando un tutorial no tiene por que perder lo que el anillo ya tenia.
@@ -131,11 +131,11 @@ impl AppState {
             recien_actualizado: AtomicBool::new(recien_actualizado),
             settings: RwLock::new(settings),
             freezes: RwLock::new(Vec::new()),
-            sessions: RwLock::new(HashMap::new()),
             shortcuts: RwLock::new(crate::hotkeys::ShortcutStatus::default()),
             registered: RwLock::new(Vec::new()),
             intent: RwLock::new(OverlayIntent::Capture),
             recording: Mutex::new(None),
+            saving: Arc::new(AtomicU64::new(0)),
             last_region: RwLock::new(None),
             temp_root,
             capturando: Arc::new(AtomicBool::new(false)),
@@ -191,7 +191,11 @@ mod tests {
     #[test]
     fn el_reloj_nunca_se_pasa_por_debajo_de_cero() {
         assert_eq!(
-            tiempo_grabado(Duration::from_millis(100), 150, Some(Duration::from_millis(10))),
+            tiempo_grabado(
+                Duration::from_millis(100),
+                150,
+                Some(Duration::from_millis(10))
+            ),
             0
         );
     }
