@@ -58,17 +58,17 @@ export function SettingsApp(_props: { onVerBienvenida?: () => void; arrancarTour
   const enc = { ...DEFAULT_ENCODING, ...settings.encoding };
   return <div className="settings-shell">
     <aside className="settings-sidebar">
-      <div className="settings-brand"><Camera size={24} /><div>WinShotX<small>SCREEN CAPTURE</small></div></div>
+      <div className="settings-brand"><Camera size={24} /><div>WinShotX</div></div>
       <nav aria-label="Settings">
         {[["capture", Camera, "Screenshots"], ["record", Video, "Recording"], ["general", SlidersHorizontal, "Preferences"]].map(([id, Icon, label]) => {
           const Symbol = Icon as typeof Camera;
           return <button key={String(id)} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(String(id))}><Symbol size={18} />{String(label)}</button>;
         })}
       </nav>
-      <div className="settings-sidebar-bottom"><span>LOCAL CAPTURE</span><small>Record when you need it.</small><small>v{__VERSION__} · English edition</small></div>
+      <div className="settings-sidebar-bottom">Version {__VERSION__}</div>
     </aside>
     <main className="settings-main">
-      <header className="settings-page-header"><div><span className="settings-eyebrow">YOUR WORKSPACE, CAPTURED</span><h1>{tab === "capture" ? "Screenshots" : tab === "record" ? "Recording" : "Preferences"}</h1><p>{tab === "capture" ? "A clean capture, just a shortcut away." : tab === "record" ? "Choose how your video looks and how it is encoded." : "Make capture fit your workflow."}</p></div><span className="settings-save" role="status">{saved && <><Check size={14} /> Saved</>}</span></header>
+      <header className="settings-page-header"><div><h1>{tab === "capture" ? "Screenshots" : tab === "record" ? "Recording" : "Preferences"}</h1><p>{tab === "capture" ? "Shortcuts and capture options." : tab === "record" ? "Recording and video encoding options." : "Files, appearance, and startup."}</p></div><span className="settings-save" role="status">{saved && <><Check size={14} /> Saved</>}</span></header>
       {error && <p className="settings-error" role="alert">{error}</p>}
       {tab === "capture" && <>
         <Card title="Capture" detail="Select a region, a window, or a full screen.">

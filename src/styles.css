@@ -84,8 +84,8 @@
 
   body {
     background-color: var(--color-lienzo);
-    font-family:
-      "Inter", -apple-system, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font-size: 17px;
     color: var(--color-titulo);
   }
 
@@ -129,44 +129,40 @@
   box-shadow: var(--shadow-float);
 }
 
-/* Focused capture settings. All surfaces follow the shared theme. */
-.settings-shell { display:flex; height:100%; background:var(--color-lienzo); color:var(--color-texto); font-size:13px; }
-.settings-sidebar { width:190px; flex-shrink:0; padding:28px 14px 20px; border-right:1px solid var(--color-linea); display:flex; flex-direction:column; background:var(--color-flotante); }
-.settings-brand { display:flex; gap:12px; align-items:center; padding:0 10px 32px; font-size:19px; font-weight:700; letter-spacing:-.5px; }
-.settings-brand svg { color:var(--color-marca); }
-.settings-brand small { display:block; font-size:9px; letter-spacing:1.8px; font-weight:500; color:var(--color-apagado); margin-top:5px; }
-.settings-sidebar nav { display:flex; flex-direction:column; gap:5px; }
-.settings-sidebar nav button { display:flex; align-items:center; gap:12px; padding:12px; border-radius:9px; color:var(--color-apagado); text-align:left; }
+/* Settings use the same system typography and controls as the capture tools. */
+.settings-shell { display:flex; height:100%; background:var(--color-lienzo); color:var(--color-texto); font:17px/1.5 "Segoe UI Variable Text","Segoe UI",sans-serif; }
+.settings-sidebar { width:225px; flex-shrink:0; padding:24px 12px; border-right:1px solid var(--color-linea); display:flex; flex-direction:column; background:var(--color-flotante); }
+.settings-brand { display:flex; gap:10px; align-items:center; padding:0 12px 28px; font-size:19px; font-weight:600; }
+.settings-brand svg { color:var(--color-suave); }
+.settings-sidebar nav { display:flex; flex-direction:column; gap:4px; }
+.settings-sidebar nav button { display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:5px; color:var(--color-suave); text-align:left; font-size:17px; }
 .settings-sidebar nav button:hover { background:var(--color-realce); }
-.settings-sidebar nav button[aria-current] { color:var(--color-marca); background:color-mix(in srgb,var(--color-marca) 12%,transparent); }
-.settings-sidebar-bottom { margin-top:auto; padding:18px 10px 0; color:var(--color-tenue); }
-.settings-sidebar-bottom span { font-size:9px; letter-spacing:1.7px; }
-.settings-sidebar-bottom small { display:block; font-size:11px; margin-top:9px; }
-.settings-main { flex:1; min-width:0; padding:30px; overflow:auto; }
-.settings-page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:25px; }
-.settings-eyebrow { color:var(--color-marca); font-size:9px; letter-spacing:1.7px; font-weight:600; }
-.settings-page-header h1 { font-size:28px; font-weight:650; letter-spacing:-.8px; margin:7px 0; color:var(--color-titulo); }
-.settings-page-header p, .settings-card header p { color:var(--color-apagado); font-size:12px; line-height:1.6; }
-.settings-save { display:flex; align-items:center; gap:5px; color:#3bbd8b; font-size:11px; }
-.settings-card { border:1px solid var(--color-linea); border-radius:12px; background:var(--color-tarjeta); margin-bottom:18px; overflow:hidden; }
-.settings-card header { padding:18px 20px; border-bottom:1px solid var(--color-linea); }
-.settings-card h2 { font-size:14px; font-weight:600; margin-bottom:4px; }
-.settings-field { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 20px; border-bottom:1px solid var(--color-linea-tenue); }
+.settings-sidebar nav button[aria-current] { color:var(--color-titulo); background:var(--color-realce); box-shadow:inset 3px 0 var(--color-marca); }
+.settings-sidebar-bottom { margin-top:auto; padding:18px 12px 0; color:var(--color-apagado); font-size:15px; }
+.settings-main { flex:1; min-width:0; padding:26px 28px; overflow:auto; }
+.settings-page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+.settings-page-header h1 { font-size:28px; line-height:1.3; font-weight:600; margin:0 0 8px; color:var(--color-titulo); }
+.settings-page-header p, .settings-card header p { color:var(--color-apagado); font-size:16px; line-height:1.5; }
+.settings-save { display:flex; align-items:center; gap:6px; color:#75bb94; font-size:15px; }
+.settings-card { border:1px solid var(--color-linea); border-radius:6px; background:var(--color-tarjeta); margin-bottom:20px; overflow:hidden; }
+.settings-card header { padding:16px 20px; border-bottom:1px solid var(--color-linea); }
+.settings-card h2 { font-size:18px; font-weight:600; margin-bottom:5px; }
+.settings-field { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:16px 20px; min-height:60px; border-bottom:1px solid var(--color-linea-tenue); }
 .settings-field:last-child { border-bottom:0; }
 .settings-field>div:first-child { flex:1; min-width:0; }
-.settings-field small { display:block; color:var(--color-apagado); font-size:11px; margin-top:5px; line-height:1.5; overflow-wrap:anywhere; }
-.settings-control { display:flex; align-items:center; gap:8px; max-width:60%; }
-.settings-control select,.settings-control input:not([type=range]),.settings-control button:not([role=switch]) { background:var(--color-hueco); border:1px solid var(--color-linea-fuerte); border-radius:6px; padding:7px 9px; color:var(--color-texto); max-width:100%; font-size:11px; }
+.settings-field small { display:block; color:var(--color-apagado); font-size:15px; margin-top:5px; line-height:1.5; overflow-wrap:anywhere; }
+.settings-control { display:flex; align-items:center; gap:10px; max-width:58%; }
+.settings-control select,.settings-control input:not([type=range]),.settings-control button:not([role=switch]) { background:var(--color-hueco); border:1px solid var(--color-linea-fuerte); border-radius:5px; padding:8px 10px; color:var(--color-texto); max-width:100%; font-size:16px; }
 .settings-control button:not([role=switch]) { display:flex; align-items:center; gap:6px; }
-.settings-control input[type=number] { width:80px; }
-.settings-control input[type=range] { width:110px; accent-color:var(--color-marca); }
-.settings-control input:not([type=range]):not([type=number]) { width:135px; }
-.settings-control select { max-width:240px; }
-.settings-primary { display:inline-flex; align-items:center; gap:8px; background:var(--color-marca); color:white; border-radius:7px; padding:11px 16px; font-weight:600; font-size:12px; }
-.settings-error { padding:12px 18px; color:#ef9a9a; background:#d6333314; border-radius:7px; line-height:1.5; }
-.settings-note { padding:12px 20px; color:var(--color-apagado); font-size:11px; line-height:1.6; }
+.settings-control input[type=number] { width:85px; }
+.settings-control input[type=range] { width:125px; accent-color:var(--color-marca); }
+.settings-control input:not([type=range]):not([type=number]) { width:145px; }
+.settings-control select { max-width:330px; }
+.settings-primary { display:inline-flex; align-items:center; gap:8px; background:var(--color-marca); color:white; border-radius:5px; padding:10px 16px; font-weight:600; font-size:16px; }
+.settings-error { padding:12px 18px; color:#ef9a9a; background:#d6333314; border-radius:5px; line-height:1.5; }
+.settings-note { padding:12px 20px; color:var(--color-apagado); font-size:15px; line-height:1.5; }
 .settings-advanced { padding:16px 20px; border-top:1px solid var(--color-linea); }
-.settings-advanced summary { color:var(--color-marca); cursor:pointer; }
-.settings-advanced p { font-size:11px; line-height:1.6; color:var(--color-apagado); margin:12px 0; }
-.settings-advanced textarea { width:100%; min-height:85px; border:1px solid var(--color-linea-fuerte); border-radius:6px; background:var(--color-hueco); color:var(--color-texto); padding:10px; font-family:Consolas,monospace; font-size:12px; user-select:text; }
-.settings-shell :focus-visible { outline:2px solid var(--color-marca); outline-offset:3px; }
+.settings-advanced summary { color:var(--color-suave); cursor:pointer; font-size:16px; }
+.settings-advanced p { font-size:15px; line-height:1.5; color:var(--color-apagado); margin:12px 0; }
+.settings-advanced textarea { width:100%; min-height:100px; border:1px solid var(--color-linea-fuerte); border-radius:5px; background:var(--color-hueco); color:var(--color-texto); padding:12px; font-family:Consolas,monospace; font-size:16px; user-select:text; }
+.settings-shell :focus-visible { outline:2px solid var(--color-marca); outline-offset:2px; }

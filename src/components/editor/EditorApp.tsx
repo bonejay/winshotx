@@ -572,14 +572,14 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
             */}
             {aviso && (
               <div className="pointer-events-none absolute top-3 left-1/2 max-w-[80%] -translate-x-1/2">
-                <span className="block truncate rounded-full bg-black/85 px-3 py-1.5 text-[12px] text-neutral-100 shadow-lg backdrop-blur-md">
+                <span className="block truncate rounded-full bg-black/85 px-3 py-1.5 text-[14px] text-neutral-100 shadow-lg backdrop-blur-md">
                   {aviso}
                 </span>
               </div>
             )}
             {videoUrl && falloDeVideo && (
               <div className="pointer-events-none absolute top-3 left-1/2 max-w-[80%] -translate-x-1/2">
-                <span className="block truncate rounded-full bg-red-950/85 px-3 py-1.5 text-[12px] text-red-200 shadow-lg backdrop-blur-md">
+                <span className="block truncate rounded-full bg-red-950/85 px-3 py-1.5 text-[14px] text-red-200 shadow-lg backdrop-blur-md">
                   {t("This video will not play")} · {falloDeVideo}
                 </span>
               </div>
@@ -607,14 +607,14 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     </button>
                   ) : previaFallida ? (
                     <span
-                      className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-amber-300/90"
+                      className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] whitespace-nowrap text-amber-300/90"
                       title={t("You can still crop it and export it: the only thing off is playing it")}
                     >
                       <VideoOff className="size-4" />
                       {t("No preview")}
                     </span>
                   ) : (
-                    <span className="flex items-center gap-2 rounded-full px-1.5 py-1 text-[11px] whitespace-nowrap text-neutral-300">
+                    <span className="flex items-center gap-2 rounded-full px-1.5 py-1 text-[13px] whitespace-nowrap text-neutral-300">
                       <AnilloDeEspera porCiento={porCiento} />
                       {porCiento > 0
                         ? `${t("Getting the video ready…")} ${porCiento}%`
@@ -625,7 +625,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     Dónde se está y cuánto dura lo que se queda, juntos: un reloj suelto no
                     dice si 0:03 es el principio de algo largo o el final de algo corto.
                   */}
-                  <span className="px-1.5 font-mono text-[11px] whitespace-nowrap tabular-nums text-neutral-300">
+                  <span className="px-1.5 font-mono text-[13px] whitespace-nowrap tabular-nums text-neutral-300">
                     {formatTimecode(frames[currentIndex]?.timestampMs ?? 0)}
                     <span className="text-neutral-500"> / {formatTimecode(keptMs)}</span>
                   </span>
@@ -633,7 +633,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                   <button
                     type="button"
                     onClick={() => markIn(currentIndex)}
-                    className="flex items-center gap-1 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
+                    className="flex items-center gap-1 rounded-full px-2 py-1 text-[13px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
                     title={t("Start the clip here (I)")}
                   >
                     <Scissors className="size-3.5" /> {t("Start")}
@@ -641,7 +641,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                   <button
                     type="button"
                     onClick={() => markOut(currentIndex)}
-                    className="flex items-center gap-1 rounded-full px-2 py-1 text-[11px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
+                    className="flex items-center gap-1 rounded-full px-2 py-1 text-[13px] whitespace-nowrap text-neutral-300 transition-colors hover:bg-white/10 hover:text-white"
                     title={t("End the clip here (O)")}
                   >
                     <Scissors className="size-3.5 -scale-x-100" /> {t("End")}
@@ -656,7 +656,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                   setHerramienta(null);
                 }}
                 aria-pressed={recortando}
-                className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] whitespace-nowrap transition-colors ${
+                className={`flex items-center gap-1 rounded-full px-2 py-1 text-[13px] whitespace-nowrap transition-colors ${
                   recortando || recorte
                     ? "bg-blue-500 text-white"
                     : "text-neutral-300 hover:bg-white/10 hover:text-white"
@@ -673,7 +673,7 @@ export function EditorApp({ sessionId }: { sessionId: string }) {
                     setRecorte(null);
                     setRecortando(false);
                   }}
-                  className="rounded-full px-1.5 py-1 text-[11px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
+                  className="rounded-full px-1.5 py-1 text-[13px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
                   title={t("Remove the crop")}
                 >
                   ×

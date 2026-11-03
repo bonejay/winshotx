@@ -203,7 +203,9 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     // cual tiene el raton antes de decidir por cual se empieza.
     let monitors = capture::monitors()?;
     if monitors.is_empty() {
-        return Err(crate::error::AppError::Msg("No display was detected".into()));
+        return Err(crate::error::AppError::Msg(
+            "No display was detected".into(),
+        ));
     }
     let cursor = cursor_position();
 
@@ -340,7 +342,10 @@ fn esperar_a_que_se_vea(monitor_id: u32, generacion: u64) {
         {
             let pendientes = PENDIENTES.lock();
             if pendientes.generacion != generacion
-                || !pendientes.ventanas.iter().any(|(id, _, _)| *id == monitor_id)
+                || !pendientes
+                    .ventanas
+                    .iter()
+                    .any(|(id, _, _)| *id == monitor_id)
             {
                 return;
             }
@@ -373,7 +378,10 @@ fn sacar_pendiente(monitor_id: u32, generacion: u64) -> Option<(String, MonitorI
     if pendientes.generacion != generacion {
         return None;
     }
-    let posicion = pendientes.ventanas.iter().position(|(id, _, _)| *id == monitor_id)?;
+    let posicion = pendientes
+        .ventanas
+        .iter()
+        .position(|(id, _, _)| *id == monitor_id)?;
     let (_, label, monitor) = pendientes.ventanas.remove(posicion);
     let cursor = pendientes.cursor;
     let es_la_del_raton = cursor.is_some_and(|(x, y)| monitor.contains(x, y));
@@ -433,8 +441,8 @@ fn mostrar_las_que_falten(app: &AppHandle, generacion: u64) {
         let cursor = pendientes.cursor;
         let mut lista = Vec::new();
         for (id, label, monitor) in std::mem::take(&mut pendientes.ventanas) {
-            let con_foco = !pendientes.con_foco
-                && cursor.is_some_and(|(x, y)| monitor.contains(x, y));
+            let con_foco =
+                !pendientes.con_foco && cursor.is_some_and(|(x, y)| monitor.contains(x, y));
             if con_foco {
                 pendientes.con_foco = true;
             }
@@ -544,12 +552,9 @@ fn colocar_ventanita(window: &tauri::WebviewWindow, en: Option<u32>) {
 
 /// La deja centrada en ese monitor, con el tamanno que le toca por su escalado.
 fn poner_en(window: &tauri::WebviewWindow, monitor: &xcap::Monitor) {
-    let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-        monitor.x(),
-        monitor.y(),
-        monitor.width(),
-        monitor.height(),
-    ) else {
+    let (Ok(x), Ok(y), Ok(width), Ok(height)) =
+        (monitor.x(), monitor.y(), monitor.width(), monitor.height())
+    else {
         return;
     };
 
@@ -632,7 +637,11 @@ fn esconder_cuenta_atras(app: &AppHandle) {
     let _ = window.emit_to(COUNTDOWN_LABEL, crate::EVENT_COUNTDOWN, 0u32);
 }
 
-fn build_overlay_window(app: &AppHandle, label: &str, monitor_id: u32) -> Result<tauri::WebviewWindow> {
+fn build_overlay_window(
+    app: &AppHandle,
+    label: &str,
+    monitor_id: u32,
+) -> Result<tauri::WebviewWindow> {
     let url = WebviewUrl::App(format!("overlay.html?monitor={monitor_id}").into());
     Ok(WebviewWindowBuilder::new(app, label, url)
         .additional_browser_args(NAVEGADOR_ARGS)
@@ -648,12 +657,8 @@ fn build_overlay_window(app: &AppHandle, label: &str, monitor_id: u32) -> Result
         .build()?)
 }
 
-/// Crea de antemano las ventanas overlay de los monitores actuales, aparcadas, sin esperar
-/// a la primera captura del dia. Se llama una vez al arrancar la app: en ese momento no
-/// hay ninguna ventana visible que el usuario este esperando (winshotx arranca en la
-/// bandeja), asi que el coste de montar cada WebView2 no lo nota nadie. Sin esto, la
-/// primera vez que se pulsa el atajo tras abrir la app tiene que pagar ese coste igual
-/// que antes del pool.
+/// Prepare capture windows without ever showing them at startup.
+/// Off-screen coordinates are not a visibility guarantee on mixed-DPI desktops.
 pub fn precrear_overlays(app: &AppHandle) {
     let Ok(monitors) = capture::monitors() else {
         return;
@@ -666,17 +671,9 @@ pub fn precrear_overlays(app: &AppHandle) {
         let Ok(window) = build_overlay_window(app, &label, monitor.id) else {
             continue;
         };
-        // Aparcada fuera de las pantallas y ENSENNADA, no escondida.
-        //
-        // Una ventana que no se ha ensennado nunca no tiene interfaz montada, asi que la
-        // primera captura del dia pagaba entero el arranque de su navegador. Aparcada
-        // fuera se monta ahora, mientras nadie espera nada (la app vive en la bandeja), y
-        // el primer atajo la encuentra despierta. Es lo mismo que hace `close_overlays`
-        // entre captura y captura, y por la misma razon. Primero el sitio y despues el
-        // tamanno, para que el tamanno se aplique ya con el DPI de su monitor.
         let _ = window.set_position(aparcadero_de(monitor, &monitors));
         let _ = window.set_size(PhysicalSize::new(monitor.width, monitor.height));
-        let _ = window.show();
+        let _ = window.hide();
     }
 }
 
@@ -704,31 +701,10 @@ pub fn close_overlays(app: &AppHandle) {
         pendientes.generacion += 1;
         pendientes.ventanas.clear();
     }
-    let monitores = capture::monitors().unwrap_or_default();
     for (label, window) in app.webview_windows() {
-        let Some(id) = label
-            .strip_prefix(OVERLAY_PREFIX)
-            .and_then(|resto| resto.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        // **Aparcada fuera de las pantallas, no escondida.**
-        //
-        // Una ventana escondida se queda sin atender: al ensennarla otra vez tardaba
-        // entre 300 y 490 ms en enterarse siquiera del aviso de Rust, y ahi se iba la
-        // mitad de lo que tarda el atajo (medido: de 905 a 623 ms el camino entero,
-        // hasta ver la imagen). Aparcada sigue existiendo para Windows, asi que
-        // reacciona antes, y como esta fuera de todas las pantallas no la ve nadie.
-        // (Y desde que el navegador arranca con `NAVEGADOR_ARGS`, aparcada tampoco se
-        // duerme: el aviso le llega en 10 ms.)
-        //
-        // Y cada una a SU aparcadero, pegado a su monitor: ver `aparcadero_de`.
-        let sitio = monitores
-            .iter()
-            .find(|m| m.id == id)
-            .map(|m| aparcadero_de(m, &monitores))
-            .unwrap_or_else(|| aparcadero(app));
-        let _ = window.set_position(sitio);
+        if label.starts_with(OVERLAY_PREFIX) {
+            let _ = window.hide();
+        }
     }
 }
 
@@ -750,8 +726,16 @@ fn aparcadero_de(monitor: &MonitorInfo, todos: &[MonitorInfo]) -> PhysicalPositi
     const MARGEN: i32 = 100;
     let izquierda = todos.iter().map(|m| m.x).min().unwrap_or(monitor.x);
     let arriba = todos.iter().map(|m| m.y).min().unwrap_or(monitor.y);
-    let derecha = todos.iter().map(|m| m.x + m.width as i32).max().unwrap_or(monitor.x);
-    let abajo = todos.iter().map(|m| m.y + m.height as i32).max().unwrap_or(monitor.y);
+    let derecha = todos
+        .iter()
+        .map(|m| m.x + m.width as i32)
+        .max()
+        .unwrap_or(monitor.x);
+    let abajo = todos
+        .iter()
+        .map(|m| m.y + m.height as i32)
+        .max()
+        .unwrap_or(monitor.y);
     let (ancho, alto) = (monitor.width as i32, monitor.height as i32);
     let candidatos = [
         (monitor.x, arriba - alto - MARGEN),
@@ -760,9 +744,12 @@ fn aparcadero_de(monitor: &MonitorInfo, todos: &[MonitorInfo]) -> PhysicalPositi
         (derecha + MARGEN, monitor.y),
     ];
     let mas_cercano = |x: i32, y: i32| {
-        todos
-            .iter()
-            .min_by_key(|m| distancia_entre((x, y, x + ancho, y + alto), (m.x, m.y, m.x + m.width as i32, m.y + m.height as i32)))
+        todos.iter().min_by_key(|m| {
+            distancia_entre(
+                (x, y, x + ancho, y + alto),
+                (m.x, m.y, m.x + m.width as i32, m.y + m.height as i32),
+            )
+        })
     };
     let elegido = candidatos
         .iter()
@@ -783,27 +770,6 @@ fn distancia_entre(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> i64 {
     let dx = i64::from((b.0 - a.2).max(a.0 - b.2).max(0));
     let dy = i64::from((b.1 - a.3).max(a.1 - b.3).max(0));
     dx * dx + dy * dy
-}
-
-/// Un punto fuera de todas las pantallas, donde aparcar un overlay sin que se vea. Es el
-/// respaldo de `aparcadero_de`, para una ventana de la que no se sabe el monitor.
-///
-/// No vale un numero grande y negativo a ojo: con un monitor a la izquierda del principal,
-/// las coordenadas negativas son pantalla de verdad. Se busca la esquina de mas arriba y
-/// mas a la izquierda de todo el escritorio y se sale de ahi por el alto de la pantalla mas
-/// alta, que es lo que puede llegar a medir un overlay.
-fn aparcadero(app: &AppHandle) -> PhysicalPosition<i32> {
-    let mut x = 0;
-    let mut y = 0;
-    let mut alto = 1080;
-    if let Ok(monitores) = app.available_monitors() {
-        for m in monitores {
-            x = x.min(m.position().x);
-            y = y.min(m.position().y);
-            alto = alto.max(m.size().height as i32);
-        }
-    }
-    PhysicalPosition::new(x - 200, y - alto - 200)
 }
 
 /// Barra flotante que acompanna a la grabacion, justo debajo de la region.
@@ -836,7 +802,7 @@ pub fn open_recorder(app: &AppHandle, region: Rect) -> Result<String> {
         .resizable(false)
         .shadow(true)
         .visible(false)
-        .inner_size(360.0, 52.0)
+        .inner_size(BARRA_ANCHO, BARRA_ALTO)
         .build()?;
     crate::platform::window_style::rounded_corners(&window);
     if !crate::platform::window_style::fuera_de_la_captura(&window, true) {
@@ -869,18 +835,36 @@ fn colocar_barra(window: &tauri::WebviewWindow, region: Rect) {
         region.x + region.width as i32 / 2,
         region.y + region.height as i32 / 2,
     );
-    let (x, y) = sitio_de_la_barra(region, monitor_de(centro.0, centro.1));
+    let monitor = monitor_de(centro.0, centro.1);
+    let (x, y) = sitio_de_la_barra(region, monitor);
     let _ = window.set_position(PhysicalPosition::new(x, y));
+    let _ = window.set_size(medida_de_la_barra(monitor));
 }
 
 /// La cuenta de donde va la barra, aparte del resto para poder probarla sin pantallas.
 ///
 /// Si no se sabe en que monitor cae, se coloca debajo de la region y se deja estar: es
 /// preferible una barra un poco fuera de sitio que una barra en otra pantalla.
+fn medida_de_la_barra(monitor: Option<MonitorSitio>) -> PhysicalSize<u32> {
+    let scale = monitor.map(|m| m.escala).unwrap_or(1.0);
+    let width = (BARRA_ANCHO * scale) as i32;
+    let height = (BARRA_ALTO * scale) as i32;
+    let margin = (8.0 * scale) as i32;
+    PhysicalSize::new(
+        monitor
+            .map(|m| width.min((m.ancho - margin * 2).max(1)))
+            .unwrap_or(width) as u32,
+        monitor
+            .map(|m| height.min((m.alto - margin * 2).max(1)))
+            .unwrap_or(height) as u32,
+    )
+}
+
 fn sitio_de_la_barra(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) {
     let escala = monitor.map(|m| m.escala).unwrap_or(1.0);
-    let ancho_px = (BARRA_ANCHO * escala) as i32;
-    let alto_px = (BARRA_ALTO * escala) as i32;
+    let size = medida_de_la_barra(monitor);
+    let ancho_px = size.width as i32;
+    let alto_px = size.height as i32;
     let hueco = (12.0 * escala) as i32;
 
     let mut x = region.x + (region.width as i32 - ancho_px) / 2;
@@ -903,8 +887,8 @@ fn sitio_de_la_barra(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) 
 
 /// Ancho y alto de la barra de grabacion, en pixeles logicos. Los mismos que pide el
 /// constructor de la ventana: si se separan, la barra deja de quedar centrada.
-const BARRA_ANCHO: f64 = 360.0;
-const BARRA_ALTO: f64 = 52.0;
+const BARRA_ANCHO: f64 = 450.0;
+const BARRA_ALTO: f64 = 56.0;
 
 /// Los datos de un monitor que hacen falta para colocar una ventana encima.
 #[derive(Debug, Clone, Copy)]
@@ -969,7 +953,7 @@ pub fn open_editor(app: &AppHandle, session_id: &str) -> Result<()> {
         .title("winshotx · editor")
         .decorations(true)
         .resizable(true)
-        .inner_size(1080.0, 700.0)
+        .inner_size(1180.0, 800.0)
         .min_inner_size(760.0, 520.0)
         .center()
         .visible(true)
@@ -997,13 +981,8 @@ pub fn open_pin(app: &AppHandle, region: Rect, imagen: &std::path::Path) -> Resu
     // La ruta viaja en la URL porque la ventana nace sabiendo que imagen lleva y no
     // cambia nunca: pedirsela despues por un comando seria un viaje de ida y vuelta para
     // ensennar algo que ya estaba decidido.
-    let url = WebviewUrl::App(
-        format!(
-            "pin.html?imagen={}",
-            para_url(&imagen.to_string_lossy())
-        )
-        .into(),
-    );
+    let url =
+        WebviewUrl::App(format!("pin.html?imagen={}", para_url(&imagen.to_string_lossy())).into());
     let window = WebviewWindowBuilder::new(app, &label, url)
         .additional_browser_args(NAVEGADOR_ARGS)
         .title("winshotx")
@@ -1087,7 +1066,7 @@ pub fn show_settings(app: &AppHandle) -> Result<()> {
 #[cfg(windows)]
 fn force_foreground(window: &tauri::WebviewWindow) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, SW_SHOW, ShowWindow};
+    use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_SHOW};
 
     let Ok(handle) = window.hwnd() else { return };
     unsafe {
@@ -1141,7 +1120,7 @@ mod tests {
     fn la_barra_va_centrada_debajo_de_la_region() {
         let principal = monitor(0, 0, 1920, 1080);
         let (x, y) = sitio_de_la_barra(region(500, 100, 400, 300), Some(principal));
-        assert_eq!(x, 500 + (400 - 360) / 2, "centrada con la región");
+        assert_eq!(x, 500 + (400 - 450) / 2, "centrada con la región");
         assert_eq!(y, 100 + 300 + 12);
     }
 
@@ -1150,7 +1129,10 @@ mod tests {
     fn si_no_cabe_debajo_la_barra_se_pone_encima() {
         let principal = monitor(0, 0, 1920, 1080);
         let (_, y) = sitio_de_la_barra(region(300, 700, 800, 370), Some(principal));
-        assert!(y < 700, "tenía que subirse encima de la región y está en {y}");
+        assert!(
+            y < 700,
+            "tenía que subirse encima de la región y está en {y}"
+        );
         assert!(y >= 8, "y sin salirse por arriba");
     }
 
@@ -1166,7 +1148,7 @@ mod tests {
         let region = region(0, 0, 1920, 1080);
         let (x, y) = sitio_de_la_barra(region, Some(principal));
         let dentro = x < region.x + region.width as i32
-            && region.x < x + 360
+            && region.x < x + 450
             && y < region.y + region.height as i32
             && region.y < y + 52;
         assert!(
@@ -1181,7 +1163,8 @@ mod tests {
         let estrecho = monitor(1920, 0, 400, 800);
         let (x, _) = sitio_de_la_barra(region(1930, 10, 380, 200), Some(estrecho));
         assert!(x >= 1928, "se sale por la izquierda: {x}");
-        assert!(x + 360 <= 1920 + 400 - 8, "se sale por la derecha: {x}");
+        let width = medida_de_la_barra(Some(estrecho)).width as i32;
+        assert!(x + width <= 1920 + 400 - 8, "se sale por la derecha: {x}");
     }
 
     /// Lo que hace que anclar se entienda sin explicarlo: la captura aparece EXACTAMENTE
@@ -1199,7 +1182,11 @@ mod tests {
     fn el_ancla_se_queda_en_el_monitor_de_coordenadas_negativas() {
         let izquierdo = monitor(-1080, 0, 1080, 1920);
         let (x, y) = sitio_del_ancla(region(-900, 200, 600, 400), Some(izquierdo));
-        assert_eq!((x, y), (-900, 200), "el ancla tiene que quedarse donde estaba");
+        assert_eq!(
+            (x, y),
+            (-900, 200),
+            "el ancla tiene que quedarse donde estaba"
+        );
     }
 
     /// Un recorte pegado al borde de abajo a la derecha: la ventana se empuja hacia dentro
@@ -1236,7 +1223,10 @@ mod tests {
         assert!(!escapada.contains('\\'), "la barra invertida rompe la URL");
         assert!(!escapada.contains(' '), "el espacio corta la direccion");
         assert!(!escapada.contains(':'), "los dos puntos tambien");
-        assert!(escapada.contains("pin-1.png"), "el nombre se sigue leyendo: {escapada}");
+        assert!(
+            escapada.contains("pin-1.png"),
+            "el nombre se sigue leyendo: {escapada}"
+        );
     }
 
     /// Las tres pantallas de Munir tal como estan puestas: la principal al 125 %, una
@@ -1266,7 +1256,12 @@ mod tests {
             .min_by_key(|otro| {
                 distancia_entre(
                     (x, y, x + m.width as i32, y + m.height as i32),
-                    (otro.x, otro.y, otro.x + otro.width as i32, otro.y + otro.height as i32),
+                    (
+                        otro.x,
+                        otro.y,
+                        otro.x + otro.width as i32,
+                        otro.y + otro.height as i32,
+                    ),
                 )
             })
             .map(|otro| otro.id)
@@ -1296,9 +1291,19 @@ mod tests {
         let todos = pantallas_de_munir();
         for m in &todos {
             let sitio = aparcadero_de(m, &todos);
-            let rect = (sitio.x, sitio.y, sitio.x + m.width as i32, sitio.y + m.height as i32);
+            let rect = (
+                sitio.x,
+                sitio.y,
+                sitio.x + m.width as i32,
+                sitio.y + m.height as i32,
+            );
             for otro in &todos {
-                let suyo = (otro.x, otro.y, otro.x + otro.width as i32, otro.y + otro.height as i32);
+                let suyo = (
+                    otro.x,
+                    otro.y,
+                    otro.x + otro.width as i32,
+                    otro.y + otro.height as i32,
+                );
                 assert!(
                     distancia_entre(rect, suyo) > 0,
                     "el overlay {} aparcado en {:?} pisa el monitor {}",
@@ -1318,7 +1323,11 @@ mod tests {
         let vertical = &todos[1];
         let sitio = aparcadero_de(vertical, &todos);
         assert_eq!(vecino(sitio.x, sitio.y, vertical, &todos), vertical.id);
-        assert!(sitio.x < -1080, "tenia que salir por la izquierda: {}", sitio.x);
+        assert!(
+            sitio.x < -1080,
+            "tenia que salir por la izquierda: {}",
+            sitio.x
+        );
     }
 
     #[test]

@@ -59,7 +59,7 @@ export function Magnifier({ source, px, py, left, top, hex }: Props) {
       className="pointer-events-none absolute z-40 overflow-hidden rounded-xl border border-white/15 bg-neutral-900/90 shadow-2xl backdrop-blur-md"
     >
       <canvas ref={canvasRef} width={SIZE} height={SIZE} className="block" />
-      <div className="flex items-center justify-between gap-3 border-t border-white/10 px-2 py-1.5 font-mono text-[10px] tabular-nums text-neutral-300">
+      <div className="flex items-center justify-between gap-3 border-t border-white/10 px-2 py-1.5 font-mono text-[12px] tabular-nums text-neutral-300">
         <span>
           {Math.round(px)}, {Math.round(py)}
         </span>

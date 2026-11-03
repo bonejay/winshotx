@@ -110,7 +110,7 @@ export function FloatingToolbar({
             type="button"
             onClick={onRecord}
             disabled={busy}
-            className="flex h-8 items-center gap-2 rounded-lg bg-red-500 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-red-400 disabled:opacity-50"
+            className="flex h-8 items-center gap-2 rounded-lg bg-red-500 px-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-red-400 disabled:opacity-50"
           >
             <Circle className="size-3 fill-current" />
             {t("Record video")}
@@ -120,7 +120,7 @@ export function FloatingToolbar({
         <IconButton icon={X} label={t("Cancel")} shortcut="Esc" onClick={onCancel} danger />
       </GlassPanel>
       {busy && (
-        <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-neutral-900/90 px-2 py-1 text-[11px] text-neutral-300 shadow-lg">
+        <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-neutral-900/90 px-2 py-1 text-[13px] text-neutral-300 shadow-lg">
           <Check className="size-3 text-emerald-400" /> {t("Working…")}
         </div>
       )}

@@ -133,14 +133,14 @@ export function RecorderBar() {
 
       {/* Que se esta grabando: el formato, y el sonido solo si entra de verdad. */}
       {guardando ? (
-        <span className="text-[11px] leading-none text-neutral-400">{t("Saving…")}</span>
+        <span className="text-[13px] leading-none text-neutral-400">{t("Saving…")}</span>
       ) : pausa ? (
-        <span className="text-[11px] leading-none text-amber-400">{t("paused")}</span>
+        <span className="text-[13px] leading-none text-amber-400">{t("paused")}</span>
       ) : (
         <span data-tauri-drag-region className="flex items-center gap-1.5">
           <span
             title={tick.format === "gif" ? t("Animated GIF") : t("MP4 video")}
-            className="rounded-[5px] border border-white/10 px-1.5 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-neutral-300"
+            className="rounded-[5px] border border-white/10 px-1.5 py-0.5 text-[12px] leading-none font-semibold tracking-wide text-neutral-300"
           >
             {tick.format === "gif" ? "GIF" : "MP4"}
           </span>
@@ -158,7 +158,7 @@ export function RecorderBar() {
           {cacheGrande && (
             <span
               title={t("The lossless cache is taking up a lot of disk: stop and export")}
-              className="text-[11px] leading-none tabular-nums text-amber-400"
+              className="text-[13px] leading-none tabular-nums text-amber-400"
             >
               {formatBytes(tick.bytes)}
             </span>

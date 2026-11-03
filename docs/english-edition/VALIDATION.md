@@ -11,7 +11,11 @@ The fork replaces the custom tray WebView with a native Windows menu, provides E
 - Settings tests cover legacy language migration, rejection of saved replay enablement, and encoding preference serialization.
 - Missing-WebView2 messaging is tested in English.
 - The optimized Windows executable is built through the Tauri CLI, embedding the production frontend.
-- Browser visual checks use mocked Tauri responses at 980 × 760. The saved screenshots demonstrate the implemented UI; they do not verify desktop capture or GPU encoding.
+- Browser visual checks use mocked Tauri responses at 1100 × 840. The saved screenshots demonstrate the implemented UI; they do not verify desktop capture or GPU encoding.
+- Native startup was verified after removing the obsolete updater initialization: the process stays running and the settings window is visible.
+- Win32 window enumeration on the actual two-monitor desktop confirms both full-screen capture overlays are hidden while idle. Capture cancellation now calls `hide()` rather than leaving visible windows parked outside the desktop.
+- All 15 window-positioning tests pass, including the wider recording toolbar on narrow and negatively positioned monitors.
+- Settings use 17 px labels, 16 px controls, and 15 px supporting text. Other capture and editor text was enlarged as well; marketing labels and slogans were removed.
 
 ## Limits
 

@@ -13,10 +13,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "WinShotX ? Settings",
+        "title": "WinShotX Settings",
         "url": "index.html",
-        "width": 980,
-        "height": 760,
+        "width": 1100,
+        "height": 840,
         "resizable": true,
         "decorations": true,
         "transparent": false,
@@ -24,8 +24,8 @@
         "center": true,
         "visible": false,
         "skipTaskbar": false,
-        "minWidth": 840,
-        "minHeight": 420,
+        "minWidth": 950,
+        "minHeight": 620,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling"
       }
     ],

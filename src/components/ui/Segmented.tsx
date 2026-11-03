@@ -58,7 +58,7 @@ export function Segmented<T extends string | number>({
           aria-label={option.icono ? option.label : undefined}
           title={option.icono ? option.label : undefined}
           className={`flex items-center justify-center rounded-md font-medium whitespace-nowrap transition-colors ${
-            compacto ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs"
+            compacto ? "px-2 py-1 text-[13px]" : "px-3 py-1.5 text-xs"
           } ${ajustado ? "" : "flex-1"} ${
             option.value === value
               ? "bg-pastilla text-titulo shadow-sm"

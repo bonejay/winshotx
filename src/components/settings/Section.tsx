@@ -97,7 +97,7 @@ export function Row({
             mitad, y son frases que hay que leer enteras para decidir ("quitarla es lo
             unico que la calla del todo"). El nombre de arriba si se corta, porque es
             corto y el hueco es suyo. */}
-        {hint && <span className={`line-clamp-2 text-[12.5px] ${TONO[tone]}`}>{hint}</span>}
+        {hint && <span className={`line-clamp-2 text-[14px] ${TONO[tone]}`}>{hint}</span>}
       </span>
     </span>
   );
@@ -143,7 +143,7 @@ export function RowButton({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-md border px-2.5 py-1 text-[11.5px] whitespace-nowrap transition-colors disabled:opacity-40 ${
+      className={`rounded-md border px-2.5 py-1 text-[13px] whitespace-nowrap transition-colors disabled:opacity-40 ${
         danger
           ? "border-red-500/50 bg-red-500/15 text-red-300 hover:bg-red-500/25"
           : "border-linea-fuerte text-suave hover:bg-realce hover:text-titulo"

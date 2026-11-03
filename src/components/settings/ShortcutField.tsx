@@ -97,12 +97,12 @@ export function ShortcutField({ value, onChange, active }: Props) {
       }`}
     >
       {recording ? (
-        <span className="w-full text-center text-[11px] text-blue-300">{t("Press the keys…")}</span>
+        <span className="w-full text-center text-[13px] text-blue-300">{t("Press the keys…")}</span>
       ) : (
         parts.map((part, index) => (
           <kbd
             key={`${part}-${index}`}
-            className="rounded-[5px] border border-linea-fuerte bg-realce px-1.5 py-0.5 text-[11px] leading-none font-medium text-texto"
+            className="rounded-[5px] border border-linea-fuerte bg-realce px-1.5 py-0.5 text-[13px] leading-none font-medium text-texto"
           >
             {part}
           </kbd>

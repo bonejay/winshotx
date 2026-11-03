@@ -307,7 +307,7 @@ export function ExportPanel({
       <div className="relative min-h-0 flex-1">
       <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
       <div>
-        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Format")}</span>
+        <span className="mb-2 block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Format")}</span>
         <div className="grid grid-cols-4 gap-1 rounded-lg bg-black/40 p-1">
           {FORMATS.map((f) => (
             <button
@@ -353,7 +353,7 @@ export function ExportPanel({
       {/* Debajo de los fps a propósito: los dos hablan del ritmo, y así se leen juntos. */}
       {!esUnaFoto(format) && (
         <div>
-          <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
+          <span className="mb-2 block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
             {t("Speed")}
           </span>
           <div className="flex gap-1">
@@ -374,7 +374,7 @@ export function ExportPanel({
             ))}
           </div>
           {velocidad !== 1 && (
-            <p className="mt-1.5 text-[11px] text-neutral-400">
+            <p className="mt-1.5 text-[13px] text-neutral-400">
               {velocidad > 1
                 ? t("{n} times shorter, and it comes out silent", { n: velocidad })
                 : t("twice as long, and it comes out silent")}
@@ -384,7 +384,7 @@ export function ExportPanel({
       )}
 
       <div>
-        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Size")}</span>
+        <span className="mb-2 block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">{t("Size")}</span>
         {/*
           La proporción, de un clic.
 
@@ -395,7 +395,7 @@ export function ExportPanel({
         */}
         {onRecorte && (
           <>
-          <span className="mb-1.5 block text-[11px] text-neutral-500">{t("Aspect ratio")}</span>
+          <span className="mb-1.5 block text-[13px] text-neutral-500">{t("Aspect ratio")}</span>
           <div className="mb-2.5 flex gap-1">
             {PROPORCIONES.map((p) => {
               const puesta =
@@ -411,7 +411,7 @@ export function ExportPanel({
                       conProporcion(p.valor, session.region.width, session.region.height),
                     )
                   }
-                  className={`flex-1 rounded-lg px-1 py-1.5 text-[11px] font-medium tabular-nums transition-colors ${
+                  className={`flex-1 rounded-lg px-1 py-1.5 text-[13px] font-medium tabular-nums transition-colors ${
                     puesta
                       ? "bg-blue-500 text-white"
                       : "bg-white/5 text-neutral-300 hover:bg-white/10"
@@ -427,7 +427,7 @@ export function ExportPanel({
               disabled={recorte === null}
               title={t("Remove the crop")}
               aria-label={t("Remove the crop")}
-              className="rounded-lg px-2 py-1.5 text-[11px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
+              className="rounded-lg px-2 py-1.5 text-[13px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30"
             >
               ×
             </button>
@@ -459,7 +459,7 @@ export function ExportPanel({
                 setWidth(Math.round((fuente.width * pct) / 100));
                 setHeight(Math.round((fuente.height * pct) / 100));
               }}
-              className="rounded-md bg-white/5 px-2 py-1 text-[11px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
+              className="rounded-md bg-white/5 px-2 py-1 text-[13px] text-neutral-400 transition-colors hover:bg-white/10 hover:text-white"
             >
               {pct}%
             </button>
@@ -473,7 +473,7 @@ export function ExportPanel({
           clics, que un interruptor que no puede hacer nada es peor que no tenerlo. */}
       {!esUnaFoto(format) && (
         <div className="space-y-2 border-t border-white/8 pt-3">
-          <span className="block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
+          <span className="block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
             {t("Drawn on top")}
           </span>
           <Slider
@@ -493,7 +493,7 @@ export function ExportPanel({
           />
           {cursor > 0 && (
             <p
-              className={`text-[11px] leading-snug ${
+              className={`text-[13px] leading-snug ${
                 session.cursorBaked ? "text-amber-400/90" : "text-neutral-500"
               }`}
             >
@@ -524,14 +524,14 @@ export function ExportPanel({
             // contraseña tecleada mientras se grababa acabe dentro del vídeo.
             hint={t("only Ctrl, Alt or Win: typing never shows")}
           />
-          <p className="text-[11px] leading-snug text-neutral-500">
+          <p className="text-[13px] leading-snug text-neutral-500">
             {t("The preview already shows all of this: what you see is what you get.")}
           </p>
         </div>
       )}
 
       <div className="border-t border-white/8 pt-3">
-        <span className="mb-2 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
+        <span className="mb-2 block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
           {t("The frame around it")}
         </span>
         <Slider
@@ -571,7 +571,7 @@ export function ExportPanel({
 
       {(format === "mp4" || format === "gif" || (hasFfmpeg && !esUnaFoto(format))) && (
       <div className="space-y-0.5 border-t border-white/8 pt-3">
-        <span className="mb-1.5 block text-[10px] font-semibold tracking-wider text-neutral-500 uppercase">
+        <span className="mb-1.5 block text-[12px] font-semibold tracking-wider text-neutral-500 uppercase">
           {t("The file")}
         </span>
         {format === "mp4" && (
@@ -588,7 +588,7 @@ export function ExportPanel({
             }
           />
         )}
-        {format === "mp4" && <p className="px-1 py-2 text-[11px] text-neutral-400">Encoder preferences are set in Settings → Recording.</p>}
+        {format === "mp4" && <p className="px-1 py-2 text-[13px] text-neutral-400">Encoder preferences are set in Settings → Recording.</p>}
       </div>
       )}
 
@@ -605,12 +605,12 @@ export function ExportPanel({
           className="flex w-full items-center gap-2 rounded-lg border border-white/8 bg-black/30 px-2.5 py-1.5 text-left transition-colors hover:border-white/20"
         >
           <FolderOpen className="size-4 shrink-0 text-neutral-400" />
-          <span className="truncate text-[11px] text-neutral-400" title={directory}>
+          <span className="truncate text-[13px] text-neutral-400" title={directory}>
             {directory || t("Choose a folder…")}
           </span>
         </button>
 
-        <div className="flex items-center justify-between text-[11px] text-neutral-500">
+        <div className="flex items-center justify-between text-[13px] text-neutral-500">
           <span className="flex items-center gap-1.5">
             {useFfmpeg ? (
               <Cpu className="size-3.5" />
@@ -669,7 +669,7 @@ export function ExportPanel({
             {/* Copiar es lo que más se usa para mandarle el vídeo a alguien, así que se
                 dice en su propia línea y no escondido entre el tamaño y la carpeta. */}
             {result.copied && (
-              <p className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-2 text-[12px] font-medium text-emerald-300">
+              <p className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-2.5 py-2 text-[14px] font-medium text-emerald-300">
                 <Clipboard className="size-3.5 shrink-0" />
                 {/* Un vídeo no se pega como imagen: va como archivo (para el explorador y
                     los chats) y como su ruta escrita (para cualquier caja de texto). Se
@@ -683,14 +683,14 @@ export function ExportPanel({
             {/* Y si no se pudo, se dice por qué. Antes el fallo se tragaba y pulsar copiar
                 parecía no hacer absolutamente nada. */}
             {result.copyError && (
-              <p className="rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">
+              <p className="rounded-lg bg-red-500/10 px-2.5 py-2 text-[13px] text-red-300">
                 {t("It could not be copied")}: {t(result.copyError)}
               </p>
             )}
             <button
               type="button"
               onClick={() => void revealInExplorer(result.path)}
-              className="flex w-full items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-2 text-left text-[11px] text-neutral-300 transition-colors hover:bg-white/10"
+              className="flex w-full items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-2 text-left text-[13px] text-neutral-300 transition-colors hover:bg-white/10"
             >
               <Sparkles className="size-3.5 shrink-0" />
               <span className="truncate">
@@ -701,7 +701,7 @@ export function ExportPanel({
         )}
 
         {error && (
-          <p className="rounded-lg bg-red-500/10 px-2.5 py-2 text-[11px] text-red-300">{error}</p>
+          <p className="rounded-lg bg-red-500/10 px-2.5 py-2 text-[13px] text-red-300">{error}</p>
         )}
       </div>
     </aside>

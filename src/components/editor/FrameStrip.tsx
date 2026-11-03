@@ -93,7 +93,7 @@ export function FrameStrip({
 
   return (
     <section className="shrink-0 border-t border-white/8 bg-black/25 px-3 pt-2 pb-3">
-      <div className="mb-1.5 flex items-center justify-between text-[11px] tabular-nums text-neutral-500">
+      <div className="mb-1.5 flex items-center justify-between text-[13px] tabular-nums text-neutral-500">
         <span>
           {t("Frame {actual} of {total}", {
             actual: currentIndex + 1,

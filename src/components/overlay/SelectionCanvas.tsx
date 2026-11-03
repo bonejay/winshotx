@@ -959,7 +959,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
             <span
               // Fuera del marco cuando cabe: dentro se pone justo encima de la barra de
               // titulo de la ventana y se leen dos titulos pisados uno sobre otro.
-              className={`absolute left-0 max-w-[min(360px,100%)] truncate rounded-md bg-neutral-900/90 px-2 py-1 text-[11px] text-neutral-200 shadow-lg backdrop-blur-sm ${
+              className={`absolute left-0 max-w-[min(360px,100%)] truncate rounded-md bg-neutral-900/90 px-2 py-1 text-[13px] text-neutral-200 shadow-lg backdrop-blur-sm ${
                 highlight.rect.y > 28 ? "-top-7" : "top-1.5 left-1.5"
               }`}
             >
@@ -970,7 +970,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
                 esquina de la pantalla no la lee nadie con el raton al otro lado.
               */}
               {modo !== "still" && highlight.hwnd > 0 && (
-                <span className="ml-2 rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                <span className="ml-2 rounded bg-white/15 px-1.5 py-0.5 text-[12px] font-semibold text-white">
                   {t("W: record just this window")}
                 </span>
               )}
@@ -1106,8 +1106,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
             height: ultimaRegion.height,
           }}
         >
-          <span className="absolute -top-7 left-0 flex items-center gap-1.5 rounded-full border border-white/10 bg-neutral-900/85 px-2.5 py-1 text-[11px] whitespace-nowrap text-neutral-400 shadow-lg backdrop-blur-md">
-            <kbd className="rounded-[4px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[10px] leading-none font-medium text-neutral-200">
+          <span className="absolute -top-7 left-0 flex items-center gap-1.5 rounded-full border border-white/10 bg-neutral-900/85 px-2.5 py-1 text-[13px] whitespace-nowrap text-neutral-400 shadow-lg backdrop-blur-md">
+            <kbd className="rounded-[4px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[12px] leading-none font-medium text-neutral-200">
               R
             </kbd>
             previous region

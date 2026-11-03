@@ -120,7 +120,7 @@ export function BarraAnotar({
           value={texto}
           onChange={(e) => onTexto(e.target.value)}
           placeholder={t("Type, then click on the image")}
-          className="h-7 min-w-[190px] flex-1 rounded-md border border-white/10 bg-black/40 px-2 text-[12px] text-neutral-200 placeholder:text-neutral-600 focus:border-blue-500/70 focus:outline-none"
+          className="h-7 min-w-[190px] flex-1 rounded-md border border-white/10 bg-black/40 px-2 text-[14px] text-neutral-200 placeholder:text-neutral-600 focus:border-blue-500/70 focus:outline-none"
         />
       )}
 

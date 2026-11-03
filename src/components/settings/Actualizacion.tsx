@@ -179,7 +179,7 @@ export function EstadoActualizacion({
         {alDia ? (
           <>
             <Check className="size-4 text-emerald-400" />
-            <span className="text-[11.5px] text-apagado">{t("Up to date")}</span>
+            <span className="text-[13px] text-apagado">{t("Up to date")}</span>
           </>
         ) : (
           <RefreshCw
@@ -193,7 +193,7 @@ export function EstadoActualizacion({
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span
-        className={`truncate text-[11.5px] ${
+        className={`truncate text-[13px] ${
           fase.tipo === "error" ? "text-red-400/90" : "text-apagado"
         }`}
       >
@@ -218,7 +218,7 @@ export function BotonActualizar({
 }) {
   const t = useT();
   const base =
-    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] transition-colors disabled:opacity-50";
+    "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] transition-colors disabled:opacity-50";
 
   if (fase.tipo === "hay") {
     return (
@@ -241,7 +241,7 @@ export function BotonActualizar({
             style={{ width: `${fase.pct}%` }}
           />
         </span>
-        <span className="text-[11px] tabular-nums text-apagado">{fase.pct} %</span>
+        <span className="text-[13px] tabular-nums text-apagado">{fase.pct} %</span>
       </span>
     );
   }

@@ -16,7 +16,7 @@ export function Toggle({ checked, onChange, label, hint }: Props) {
     >
       <span>
         <span className="block text-xs font-medium text-texto">{label}</span>
-        {hint && <span className="block text-[11px] text-tenue">{hint}</span>}
+        {hint && <span className="block text-[13px] text-tenue">{hint}</span>}
       </span>
       <span
         className={`relative h-[22px] w-[40px] shrink-0 rounded-full transition-colors duration-150 ${

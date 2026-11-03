@@ -106,7 +106,7 @@ export function Ayuda({ texto, children }: { texto: string; children: ReactNode 
             // Nace invisible y en la esquina: se enseña cuando ya se ha medido, o se vería
             // un parpadeo en el sitio equivocado antes de saltar al bueno.
             style={{ position: "fixed", left: 0, top: 0, visibility: "hidden" }}
-            className="pointer-events-none z-50 max-w-[19rem] rounded-lg border border-linea-fuerte bg-flotante px-3 py-2 text-[12.5px] leading-[1.45] text-suave shadow-2xl"
+            className="pointer-events-none z-50 max-w-[19rem] rounded-lg border border-linea-fuerte bg-flotante px-3 py-2 text-[14px] leading-[1.45] text-suave shadow-2xl"
           >
             {texto}
           </div>,

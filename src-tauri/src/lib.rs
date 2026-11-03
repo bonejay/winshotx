@@ -197,13 +197,7 @@ pub fn run() {
                 platform::autostart::revisar_ruta();
             }
 
-            // El anillo de los ultimos segundos vuelve solo si se dejo encendido: es un
-            // ajuste que se pone una vez y se espera encontrar puesto. Si no arranca, se
-            // dice por consola y la app sigue: quedarse sin winshotx por esto seria peor.
-            // This edition never starts a background recorder.
-            // No hay ninguna ventana visible esperando en este momento (la app arranca
-            // en la bandeja), asi que crear las ventanas overlay ahora, ocultas, no lo
-            // nota nadie: la primera captura del dia encuentra el pool ya listo.
+            // Precreate capture windows hidden; only an explicit capture may show them.
             windows_mgr::precrear_overlays(&handle);
             // Y lo mismo con la tarjeta grafica de las fotos: crear su dispositivo cuesta
             // unos 100 ms, y sin esto los pagaria el primer atajo del dia.

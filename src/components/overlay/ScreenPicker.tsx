@@ -36,12 +36,12 @@ export function ScreenPicker({ numero, total, modo, ancho, alto }: Props) {
             {numero}
           </span>
         )}
-        <span className="flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900/90 px-4 py-2 text-[13px] text-neutral-200 shadow-xl backdrop-blur-md">
+        <span className="flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900/90 px-4 py-2 text-[15px] text-neutral-200 shadow-xl backdrop-blur-md">
           {total > 1 && (
             // La tecla, porque el numero grande no dice por si solo que se pueda pulsar,
             // y con tres pantallas el raton casi nunca esta en la que se quiere.
             <>
-              <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[11px] leading-none font-medium">
+              <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[13px] leading-none font-medium">
                 {numero}
               </kbd>
               <span className="text-neutral-500">{t("or click to")}</span>
@@ -60,8 +60,8 @@ export function ScreenPicker({ numero, total, modo, ancho, alto }: Props) {
           Solo sale con varias pantallas y solo en foto, que es lo unico que sabe hacer.
         */}
         {total > 1 && modo === "still" && (
-          <span className="flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900/70 px-3 py-1.5 text-[12px] text-neutral-400 shadow-lg backdrop-blur-md">
-            <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[11px] leading-none font-medium text-neutral-200">
+          <span className="flex items-center gap-2 rounded-full border border-white/10 bg-neutral-900/70 px-3 py-1.5 text-[14px] text-neutral-400 shadow-lg backdrop-blur-md">
+            <kbd className="rounded-[5px] border border-white/15 bg-white/10 px-1.5 py-0.5 text-[13px] leading-none font-medium text-neutral-200">
               0
             </kbd>
             <span>to capture all {total} screens at once</span>
