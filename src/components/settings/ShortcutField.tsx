@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { partesDeAtajo } from "../../lib/teclas";
 import { useT } from "../../lib/i18n";
 
-/** Teclas que solo acompañan: por sí solas no forman un atajo. */
+/** Modifier-only keys: they cannot form a shortcut by themselves. */
 const MODIFIERS = new Set([
   "Control",
   "Shift",
@@ -21,7 +21,7 @@ const MODIFIERS = new Set([
 interface Props {
   value: string;
   onChange: (value: string) => void;
-  /** false cuando el sistema no ha dejado registrarlo. */
+  /** false when the system refused to register it. */
   active: boolean;
 }
 
@@ -45,21 +45,21 @@ export function ShortcutField({ value, onChange, active }: Props) {
       if (MODIFIERS.has(e.code) || MODIFIERS.has(e.key)) return;
 
       const parts: string[] = [];
-      // La tecla Windows es Super, no Ctrl. Estaban juntas en la misma línea, así que
-      // pulsar Win+X guardaba un atajo de Ctrl+X: otra tecla y otro atajo.
+      // The Windows key is Super, not Ctrl; mixing them saved Win+X as Ctrl+X.
       if (e.ctrlKey) parts.push("CmdOrCtrl");
       if (e.metaKey) parts.push("Super");
       if (e.shiftKey) parts.push("Shift");
       if (e.altKey) parts.push("Alt");
-      // Un atajo global sin modificadores secuestraría la tecla en todo el sistema.
-      if (parts.length === 0) return;
-      // Sin código físico, el atajo saldría como "CmdOrCtrl+Shift+" y Windows no puede
-      // registrar eso: pasa con el teclado en pantalla y con las teclas automatizadas.
+      // A global shortcut without modifiers would take over the key system-wide; Print Screen
+      // alone is the one exception, since taking it over is the point.
+      if (parts.length === 0 && e.code !== "PrintScreen" && e.key !== "PrintScreen") return;
+      // Without a physical key code the shortcut would be "CmdOrCtrl+Shift+", which Windows
+      // cannot register (happens with the on-screen keyboard and synthetic key events).
       if (!e.code && e.key !== "PrintScreen") return;
 
       parts.push(e.code || e.key);
-      // Cerrar ANTES de guardar. Si el guardado se va por el desagüe, el campo se
-      // quedaba pidiendo teclas para siempre y parecía que no se había enterado.
+      // Stop listening BEFORE saving, so a failed save does not leave the field waiting for
+      // keys forever.
       setRecording(false);
       onChange(parts.join("+"));
     };

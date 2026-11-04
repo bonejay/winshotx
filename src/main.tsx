@@ -4,8 +4,7 @@ import { MotionConfig } from "framer-motion";
 import { App } from "./components/App";
 import "./styles.css";
 
-// Quien tenga puesto "reducir movimiento" en Windows ve las pantallas quietas: framer solo
-// hace caso de esa preferencia si se le dice, y por defecto anima igual.
+// Respect the Windows reduced-motion setting; framer-motion only does so when told.
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <MotionConfig reducedMotion="user">

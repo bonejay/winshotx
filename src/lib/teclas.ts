@@ -1,9 +1,7 @@
 /**
- * Del nombre que entiende Tauri al que lee una persona.
- *
- * Un atajo se guarda con el codigo fisico de la tecla (`CmdOrCtrl+Shift+KeyS`) porque es lo
- * unico que no cambia con la distribucion del teclado. Eso no se le puede enseñar a nadie:
- * en pantalla tiene que poner `Ctrl Shift S`.
+ * From Tauri shortcut names to readable labels. Shortcuts are stored with physical key codes
+ * (`CmdOrCtrl+Shift+KeyS`) because those do not change with the keyboard layout; the UI shows
+ * `Ctrl Shift S`.
  */
 const BONITOS: Record<string, string> = {
   CmdOrCtrl: "Ctrl",

@@ -1,11 +1,6 @@
 /**
- * Lo que hace falta antes de cada prueba del frontend.
- *
- * Los componentes de winshotx viven dentro de una ventana de Tauri y hablan con Rust por
- * `invoke`. Aqui no hay Rust, asi que se le pone delante un doble que responde lo que se
- * le diga. Es el mismo truco de `scripts/ver-ventana.mjs`, pero sin servidor ni Chrome:
- * ahi se fotografia una pantalla entera para mirarla, y aqui se comprueba una pieza sola
- * sin que nadie tenga que mirar nada.
+ * Frontend test setup. Components talk to Rust through `invoke`; here a test double answers
+ * instead.
  */
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
@@ -13,15 +8,8 @@ import { cleanup } from "@testing-library/react";
 import { Storage } from "happy-dom";
 
 /**
- * El `localStorage` de happy-dom, puesto encima del que trae Node.
- *
- * Node trae su propio `localStorage` experimental en el global (de serie desde Node 26, y
- * con `--experimental-webstorage` antes), y como aqui `window` es el global, ese tapa al de
- * happy-dom. Sin `--localstorage-file` no sirve: en Node 26 vale `undefined` y en Node 24
- * con la bandera revienta solo con leerlo. Asi que no se le pregunta, se pisa siempre.
- *
- * Lo encontro wang13zhe en el pull request #7: con Node 26 caian todas las pruebas que
- * tocan el almacen, antes y despues de cualquier cambio.
+ * Use happy-dom's `localStorage` instead of Node's experimental global one, which shadows it
+ * (undefined in Node 26 without `--localstorage-file`, throws in Node 24 with the flag).
  */
 for (const almacen of ["localStorage", "sessionStorage"]) {
   Object.defineProperty(globalThis, almacen, {
@@ -31,29 +19,26 @@ for (const almacen of ["localStorage", "sessionStorage"]) {
   });
 }
 
-/** Lo que contesta cada comando de Rust en esta prueba. Se rellena con `responde`. */
+/** What each Rust command returns in this test. Filled with `responde`. */
 const respuestas = new Map<string, unknown>();
 
-/** Los comandos que se han llamado, en orden, para comprobar que se llamo lo que tocaba. */
+/** Commands called, in order. */
 export const llamadas: { comando: string; args: unknown }[] = [];
 
-/** Los comandos que van a fallar, con el mensaje que devuelven. Se rellena con `falla`. */
+/** Commands that will fail, with their error message. Filled with `falla`. */
 const fallos = new Map<string, string>();
 
-/** Quien esta escuchando cada evento de Tauri. Se rellena solo, con cada `listen`. */
+/** Listeners per Tauri event. Filled automatically by `listen`. */
 const oyentes = new Map<string, ((evento: { payload: unknown }) => void)[]>();
 
-/** Pone lo que devolvera un comando de Rust durante la prueba. */
+/** Set what a Rust command returns during the test. */
 export function responde(comando: string, valor: unknown) {
   respuestas.set(comando, valor);
 }
 
 /**
- * Hace que un comando de Rust falle con ese mensaje.
- *
- * Un `invoke` que falla llega al frontend como una promesa rechazada con el texto del
- * error, no con un `Error`, y sin esto no habia forma de probar lo que se le ensenna a
- * alguien cuando algo sale mal, que es justo lo que nadie mira hasta que pasa.
+ * Make a Rust command fail with this message. A failed `invoke` rejects with the error text,
+ * not an `Error`.
  */
 export function falla(comando: string, mensaje: string) {
   fallos.set(comando, mensaje);
@@ -66,17 +51,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (fallo !== undefined) return Promise.reject(fallo);
     return Promise.resolve(respuestas.get(comando) ?? null);
   },
-  // Las miniaturas y los congelados se piden por este protocolo, no por `invoke`.
+  // Frozen screens are requested through this protocol, not `invoke`.
   convertFileSrc: (ruta: string) => `asset://${ruta}`,
 }));
 
-/**
- * Manda un evento de Tauri a quien lo este escuchando, como lo mandaria Rust.
- *
- * Sin esto no se podia probar nada de lo que la app se cuenta entre ventanas, que es
- * justo donde estan los fallos que no se ven: un aviso que no llega deja un boton apagado
- * y sin explicacion, y las pruebas siguen todas en verde.
- */
+/** Emit a Tauri event to its listeners, as Rust would. */
 export function emite(evento: string, payload: unknown) {
   for (const oyente of oyentes.get(evento) ?? []) oyente({ payload });
 }
@@ -99,7 +78,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     setFocus: () => Promise.resolve(),
     label: "prueba",
   }),
-  // Dentro de la pantalla de prueba, que empieza en (0, 0): el raton esta en ella.
+  // Inside the test screen, which starts at (0, 0): the cursor is on it.
   cursorPosition: () => Promise.resolve({ x: 5, y: 5 }),
 }));
 

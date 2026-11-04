@@ -1,15 +1,13 @@
 use serde::{Serialize, Serializer};
 
-/// Un solo tipo de error para todo el backend: se serializa como texto plano,
-/// que es lo que el frontend muestra en el panel de exportacion.
+/// The backend's single error type. It serializes as plain text, which the frontend shows to
+/// the user.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
     Msg(String),
     #[error("No recording is in progress")]
     NoRecording,
-    #[error("Unknown session: {0}")]
-    UnknownSession(String),
     #[error("This feature is only available on Windows")]
     #[allow(dead_code)]
     Unsupported,
@@ -21,9 +19,7 @@ pub enum AppError {
     Image(#[from] image::ImageError),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("QOI error: {0}")]
-    Qoi(#[from] qoi::Error),
-    /// Lo que devuelven las APIs modernas de Windows (WinRT), como el lector de texto.
+    /// Errors from WinRT APIs such as OCR.
     #[cfg(windows)]
     #[error("Windows error: {0}")]
     Windows(#[from] windows::core::Error),

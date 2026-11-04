@@ -11,35 +11,25 @@ vi.mock("../../lib/ipc", () => ({
   listAudioDevices: vi.fn(async () => []), startAudioPreview: vi.fn(), stopAudioPreview: vi.fn(), audioPreviewLevels: vi.fn(),
   shortcutStatus: vi.fn(async () => ({ capture: true, edit: true, record: true })),
   openFolder: vi.fn(), trayMenuAction: vi.fn(async () => {}),
+  ffmpegCommand: vi.fn(async () => "ffmpeg -f rawvideo"), applyPreset: vi.fn(),
 }));
 const AJUSTES: Settings = {
+  presets: [],
+  activePreset: "",
   captureShortcut: "Ctrl+Shift+2",
   theme: "sistema",
-  language: "sistema",
   recordShortcut: "Ctrl+Shift+5",
-  replayShortcut: "Ctrl+Shift+6",
   saveDirectory: "C:\\Users\\prueba\\Pictures\\winshotx",
-  copyAfterCapture: true,
+  videoDirectory: "C:\\Users\\prueba\\Videos\\winshotx",
+  saveScreenshots: false,
   captureCursor: false,
   recordAudio: true,
   recordMicrophone: false,
   fps: 30,
-  replayEnabled: false,
-  replaySeconds: 30,
-  replayScreen: null,
-  replayFps: 15,
-  replayHeight: 0,
   playSound: true,
   showMagnifier: true,
   startWithWindows: false,
   captureDelaySeconds: 0,
-  hideDesktopIcons: false,
-  captureFlow: "toolbar",
-  printScreenCapture: false,
-  takeWinShiftS: false,
-  onboarded: true,
-  snippingKeyRestore: null,
-  disabledHotkeysRestore: null,
 };
 beforeEach(() => { vi.clearAllMocks(); vi.mocked(ipc.getSettings).mockResolvedValue({ ...AJUSTES, encoding: { ...DEFAULT_ENCODING } }); });
 async function open() { render(<SettingsApp />); await screen.findByRole("heading", { name: "Screenshots" }); }
@@ -50,14 +40,14 @@ describe("focused settings", () => {
     expect(screen.queryByText(/GIF|replay|always record/i)).toBeNull();
     expect(ipc.getSettings).toHaveBeenCalled();
   });
-  it("persists quality and encoding preferences while disabling old background settings", async () => {
+  it("persists quality and encoding preferences", async () => {
     await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
 
     fireEvent.change(screen.getByLabelText("Video encoder"), { target: { value: "hevc_nvenc" } });
     fireEvent.change(screen.getByLabelText("GPU device index"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("CRF / CQ quality slider"), { target: { value: "18" } });
     await waitFor(() => expect(ipc.setSettings).toHaveBeenLastCalledWith(expect.objectContaining({
-      replayEnabled: false, language: "en", encoding: expect.objectContaining({ encoder: "hevc_nvenc", preset: "p4", gpu: "1", crf: 18 }),
+      encoding: expect.objectContaining({ encoder: "hevc_nvenc", preset: "p4", gpu: "1", crf: 18 }),
     })));
   });
   it("rejects malformed advanced arguments without persisting them", async () => {

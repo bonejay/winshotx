@@ -4,14 +4,12 @@ import type { ReactNode } from "react";
 interface Props {
   children: ReactNode;
   className?: string;
-  /** Aparicion tipo macOS: escala corta y subida de 4px. */
+  /** macOS-style entrance: a short scale and a 4px rise. */
   animate?: boolean;
 }
 
 export function GlassPanel({ children, className = "", animate = true }: Props) {
-  // Quien pide menos movimiento no ve el panel escalar, y ademas aparece de golpe en vez
-  // de subir de opacidad: una barra que se desvanece hacia dentro tampoco es "menos
-  // movimiento" si lo que quieres es que este ahi cuando miras.
+  // With reduced motion the panel neither scales nor fades; it simply appears.
   const quieto = useReducedMotion();
   const base =
     "rounded-2xl border border-linea-fuerte bg-flotante/90 backdrop-blur-xl shadow-2xl";

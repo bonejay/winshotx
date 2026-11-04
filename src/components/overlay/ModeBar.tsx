@@ -1,13 +1,11 @@
-import { AppWindow, Camera, RectangleHorizontal, Monitor, PanelBottom, Settings, Video, X } from "lucide-react";
+import { AppWindow, Camera, RectangleHorizontal, Monitor, Settings, Video, X } from "lucide-react";
 import type { CaptureMode } from "../../lib/types";
 import { useT } from "../../lib/i18n";
 
 /**
- * Como reconoce el lienzo un gesto que nace en la barra.
- *
- * La barra ya no se queda los `pointerdown`: se puede empezar a recortar por debajo de
- * ella. El lienzo necesita distinguir ese gesto para no tratar el clic de un boton como
- * un clic suyo, y esta constante es la unica atadura entre los dos lados.
+ * How the canvas recognizes a gesture that starts on the bar. The bar does not capture
+ * `pointerdown`, so selecting can start underneath it; this marker lets the canvas ignore
+ * button clicks.
  */
 export const SELECTOR_BARRA = "[data-barra-modos]";
 
@@ -16,29 +14,24 @@ interface Props {
   onTarget?: (v: import("../../lib/types").CaptureTarget) => void;
   value: CaptureMode;
   onChange: (mode: CaptureMode) => void;
-  /** Coger la pantalla entera de un clic, sin arrastrar nada. */
+  /** Capture the whole screen with one click. */
   pantallaEntera: boolean;
   onPantallaEntera: (valor: boolean) => void;
-  /** Si al soltar el recorte sale la barra para elegir qué hacer con él. */
-  conBarra: boolean;
-  onConBarra: (valor: boolean) => void;
-  /** Abre los ajustes de winshotx, cerrando la captura. */
+  /** Recording presets and the active one, shown in video mode before recording starts. */
+  presets?: { name: string; summary: string }[];
+  activePreset?: string;
+  activeSummary?: string;
+  onPreset?: (name: string) => void;
+  /** Open the settings, closing the capture. */
   onAjustes: () => void;
   onCancel: () => void;
-  /** Se aparta mientras se arrastra, para no tapar lo que se está recortando. */
+  /** Moves out of the way while dragging so it does not cover the selection. */
   dimmed: boolean;
 }
 
 /**
- * Qué se va a hacer con el recorte, elegido ANTES de recortar.
- *
- * Va arriba y centrada, donde Windows pone la suya, porque es el sitio donde la gente
- * ya la busca. Y hace falta: en el perfil "se copia sola" no salía ninguna barra, así
- * que desde ese perfil no había forma de grabar nada.
- *
- * Solo iconos, sin etiqueta: una cámara, una cámara de vídeo y las letras GIF se leen de
- * un vistazo, y tres palabras al lado hacían la barra el doble de ancha para no decir
- * nada más. El texto vive en el tooltip, para quien lo necesite.
+ * Screenshot or video, chosen before selecting. Top-center, where Windows puts its own capture
+ * bar. Icons only; labels are in the tooltips.
  */
 export function ModeBar({
   target = "rectangle",
@@ -47,8 +40,10 @@ export function ModeBar({
   onChange,
   pantallaEntera,
   onPantallaEntera,
-  conBarra,
-  onConBarra,
+  presets = [],
+  activePreset = "",
+  activeSummary = "",
+  onPreset,
   onAjustes,
   onCancel,
   dimmed,
@@ -61,10 +56,8 @@ export function ModeBar({
         dimmed ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100"
       }`}
     >
-      {/* Al pasar el raton por encima se aparta: pierde el panel, la sombra y el
-          desenfoque, y se queda en un fantasma. La franja de arriba del centro es sitio
-          de capturar, y un rectangulo negro ahi tapaba justo lo que se iba a recortar.
-          Sigue pulsandose igual, y el arrastre la atraviesa (ver SELECTOR_BARRA). */}
+      {/* On hover the bar fades to an outline so it does not cover the top-center area being
+         captured. It stays clickable and drags pass through it (see SELECTOR_BARRA). */}
       <div className="flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900/90 p-1.5 shadow-2xl backdrop-blur-xl transition-[background-color,border-color,box-shadow,backdrop-filter] duration-150 ">
         <Boton
           activo={value === "still"}
@@ -86,8 +79,29 @@ export function ModeBar({
 
         <span className="mx-1 h-6 w-px bg-white/10" />
 
-        {/* El otro eje: los tres de arriba dicen QUE sale, este dice DE DONDE. Con varias
-            pantallas, cada una se pone su numero encima y se coge con un clic. */}
+        {/* Recording preset, chosen before the recording starts. */}
+        {value === "video" && presets.length > 0 && (
+          <>
+            <label className="flex items-center gap-2 px-1 text-[12px] text-neutral-300" title={activeSummary}>
+              <select
+                aria-label="Recording preset"
+                value={activePreset}
+                onChange={(e) => onPreset?.(e.target.value)}
+                className="max-w-[150px] rounded-lg border border-white/10 bg-neutral-800 px-2 py-1 text-[12px] text-neutral-100 outline-none"
+              >
+                {!activePreset && <option value="">Custom</option>}
+                {presets.map((p) => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+              <span className="whitespace-nowrap tabular-nums text-neutral-400">{activeSummary}</span>
+            </label>
+            <span className="mx-1 h-6 w-px bg-white/10" />
+          </>
+        )}
+
+        {/* Where to capture from: with several screens each shows its number and can be taken
+           with one click. */}
         <Boton activo={!pantallaEntera && target === "rectangle"} onClick={() => onTarget?.("rectangle")} etiqueta="Rectangle" titulo="Select a rectangle"><RectangleHorizontal className="size-[19px]" /></Boton>
         <Boton activo={!pantallaEntera && target === "window"} onClick={() => onTarget?.("window")} etiqueta="Window" titulo="Select a window"><AppWindow className="size-[19px]" /></Boton>
         <Boton
@@ -101,26 +115,8 @@ export function ModeBar({
 
         <span className="mx-1 h-6 w-px bg-white/10" />
 
-        {/* Y el tercer eje: que pasa DESPUES de soltar. Encendido sale la barra de la
-            seleccion (copiar, guardar, editar, anclar, texto); apagado la foto se copia
-            sola y la captura se cierra. Estaba solo en los ajustes, dos ventanas mas
-            alla, cuando es una decision que se cambia captura a captura. Grabando no
-            pinta nada: en video y en GIF la barra siempre sale, porque es donde se
-            ajusta el recuadro antes de empezar. */}
-        {value === "still" && (
-          <Boton
-            activo={conBarra}
-            onClick={() => onConBarra(!conBarra)}
-            etiqueta="Choose what to do"
-            titulo="On release, choose what to do with the crop · B"
-          >
-            <PanelBottom className="size-[19px]" />
-          </Boton>
-        )}
-
-        {/* Sin `aria-pressed`: esto no se queda pulsado, abre una ventana. Va aqui
-            porque desde una captura a pantalla completa no hay forma de llegar a los
-            ajustes sin cerrarla primero y buscar el icono de la bandeja. */}
+        {/* No `aria-pressed`: this opens a window instead of toggling. It is here because a
+           full-screen capture otherwise hides the tray icon. */}
         <button
           type="button"
           onClick={onAjustes}
@@ -147,13 +143,6 @@ export function ModeBar({
   );
 }
 
-/**
- * Las letras GIF dentro de su caja, al peso de los iconos de lucide que tiene al lado.
- *
- * No hay dibujo que signifique "GIF": el que había antes eran unas chispas, que no lo
- * decían. Las letras van como trazos, no como texto, para que engorden con el mismo
- * `stroke-width` que la cámara y no salgan finas a su lado.
- */
 
 function Boton({
   activo,

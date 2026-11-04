@@ -1,14 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos minimos: manejo de la propia ventana y eventos.",
+  "description": "Minimal permissions: own window handling and events.",
   "windows": [
     "main",
     "recorder-*",
     "overlay-*",
-    "countdown",
-    "pin-*",
-    "tray-menu"
+    "countdown"
   ],
   "permissions": [
     "core:default",
@@ -20,8 +18,6 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
-    "core:webview:allow-internal-toggle-devtools",
-    "updater:default",
-    "process:allow-restart"
+    "core:webview:allow-internal-toggle-devtools"
   ]
 }

@@ -8,7 +8,7 @@ interface Props {
   danger?: boolean;
   accent?: boolean;
   disabled?: boolean;
-  /** Muestra el texto junto al icono en vez de solo el tooltip. */
+  /** Show the label next to the icon instead of only as a tooltip. */
   showLabel?: boolean;
   shortcut?: string;
 }

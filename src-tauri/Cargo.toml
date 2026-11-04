@@ -19,32 +19,23 @@ tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-# Una sola instancia: dos winshotx a la vez se pelean por los atajos globales
-# y el segundo se queda sin ellos sin decir por que.
+# One instance only: a second one would fail to get the global shortcuts.
 tauri-plugin-single-instance = "2"
-# Actualizacion desde la propia app, firmada: sin esto habria que ir a GitHub a mano.
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 parking_lot = "0.12"
-rayon = "1"
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg"] }
-qoi = "0.4"
 xcap = "0.9"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 windows-capture = "2"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Graphics_Dwm", "Win32_Globalization", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_Storage_Xps", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Foundation_Collections", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Graphics_Capture", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D11", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_Storage_Packaging_Appx", "ApplicationModel"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Graphics_Dwm", "Win32_Globalization", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_Storage_Xps", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Foundation_Collections", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Graphics_Capture", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D11", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture"] }
 clipboard-win = "5"
-# El `.join()` que espera a un `IAsyncOperation` de WinRT vive en un trait de este crate,
-# no en el de `windows`: sin el, `StartupTask::GetAsync` no se puede resolver.
-windows-future = "0.3"
 
-# El binario tiene que caber en unos pocos MB: nada de simbolos ni unidades sueltas.
+# Small release binary.
 [profile.release]
 opt-level = "s"
 lto = true

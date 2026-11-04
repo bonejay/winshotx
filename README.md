@@ -20,16 +20,18 @@ A focused Windows screenshot and on-demand video recorder, forked from [Mun1to/w
 
 ## Capture
 
-Left-click the tray icon to select a screenshot region. Right-click for screenshots, start/stop recording, the capture folder, settings, or quit.
+Left-click the tray icon to open the app. Right-click for screenshots, start/stop recording, the capture folder, settings, or quit.
 
 Default shortcuts:
 
 | Action | Shortcut |
 | --- | --- |
-| Screenshot | Ctrl+Shift+2 |
-| Start / stop video | Ctrl+Shift+5 |
+| Screenshot | Print Screen |
+| Start / stop video | Shift+Print Screen |
 
-Change shortcuts in Settings by clicking a shortcut and pressing a combination, including Shift+Print Screen. Screenshot and recording shortcuts each have an independent default selection: Rectangle, Window, or Full screen. The capture menu opens with screenshot/video and that selection already chosen. Screenshots can be copied, saved, pinned, or read as text. Video recordings save directly as MP4; the editor and its source code have been removed.
+Change shortcuts in Settings by clicking a shortcut and pressing a combination; Print Screen may be used on its own. When a shortcut uses Print Screen, WinShotX turns off the Windows setting that gives that key to the Snipping Tool (`PrintScreenKeyForSnippingEnabled`). Screenshot and recording shortcuts each have an independent default selection: Rectangle, Window, or Full screen.
+
+There is no toolbar after selecting: releasing the mouse copies a screenshot to the clipboard (and, if enabled, also saves it to the screenshot folder) or starts the recording. Screenshots default to `F:\Pictures\Screenshots` and videos to `F:\Videos\Captures`; both can be changed under Preferences.
 
 ## Encoding
 
@@ -53,11 +55,13 @@ Recordings are encoded live. Raw BGRA frames and 16-bit PCM audio are streamed t
 
 Video and audio share one clock that excludes paused time. A static source repeats its last frame at the output rate. If the encoder falls more than two seconds behind, recording stops with an error and the fragments written so far are kept; choose a faster preset, a hardware encoder, or a lower frame rate.
 
+**Recording presets** store a frame rate plus all encoding options. Pick one under Settings → Recording → Presets or in the capture bar at the top of the screen before recording; save the current settings under a name to create or replace one. Below the encoding options the settings show the exact FFmpeg command recordings run, generated from those settings; any LLM or guide can help you write extra arguments for it, which you then save as a preset.
+
 Use **Test encoder** to encode a half-second generated 1280 × 720 picture and tone at the selected frame rate. It checks the actual encoder, preset, quality, device index, and advanced arguments without reading your screen or audio devices. Results clear when relevant settings change. Tests time out after 20 seconds. Passing checks compatibility; it does not promise sustained full-resolution capture performance.
 
 120 fps is a target, not a guarantee of 120 distinct source frames per second. Windows Graphics Capture delivers frames according to source/compositor updates and system performance; see the [capture backend's frame-update behavior](https://docs.rs/windows-capture/latest/windows_capture/settings/enum.MinimumUpdateIntervalSettings.html). The recording bar reports measured capture fps. Cadence tests cover 144 Hz and 240 Hz sources, and a bounded raw-frame queue prevents an encoder or disk backlog from consuming unbounded memory.
 
-The preset field takes an FFmpeg encoder preset name. Use a fast preset for live recording. Defaults are `veryfast` for x264/x265/Quick Sync, `p4` for NVENC, and the encoder default for AMF/software AV1.
+The encoder preset is a drop-down of the values the selected encoder accepts. Use a fast preset for live recording. Defaults are `veryfast` for x264/x265/Quick Sync, `p4` for NVENC, and the encoder default for AMF/software AV1.
 
 Advanced output arguments are a JSON array of strings, for example:
 

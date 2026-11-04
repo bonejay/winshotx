@@ -3,17 +3,17 @@ import { AnimatePresence } from "framer-motion";
 import { emit, listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  applyPreset,
   cancelCapture,
   captureAllScreens,
   captureStill,
   copyColor,
-  cronoMarca,
   freezeBytes,
   freezePng,
+  getSettings,
   openSettings,
   overlayBootstrap,
   overlayListo,
-  setCaptureFlow,
   startRecording,
 } from "../../lib/ipc";
 import { clamp } from "../../lib/format";
@@ -36,8 +36,8 @@ import {
 } from "../../lib/types";
 import { BootScreen } from "./BootScreen";
 import { DimensionBadge } from "./DimensionBadge";
-import { FloatingToolbar } from "./FloatingToolbar";
 import { Magnifier } from "./Magnifier";
+import { presetSummary } from "../../lib/presets";
 import { ModeBar, SELECTOR_BARRA } from "./ModeBar";
 import { ScreenPicker } from "./ScreenPicker";
 import { SelectionHandles, type HandleId } from "./SelectionHandles";
@@ -48,48 +48,17 @@ type Mode =
   | { kind: "moving"; grabX: number; grabY: number; base: Rect }
   | { kind: "resizing"; handle: HandleId; base: Rect };
 
-const MIN_DRAG = 4; // por debajo de esto, un arrastre cuenta como clic
+const MIN_DRAG = 4; // below this, a drag counts as a click
 
-/** Lo que ocupa la lupa con su barra de abajo, y el aire que se le deja al cursor. */
-const LUPA_ANCHO = 148;
-const LUPA_ALTO = 168;
+/** Space taken by the magnifier and its caption, plus a gap from the cursor. */
+const LUPA_ANCHO = 90;
+const LUPA_ALTO = 112;
 const LUPA_AIRE = 18;
 
-/** Lo que ocupa la barra de acciones de alto, y el aire que se le deja al recorte. */
-const BARRA_ALTO = 52;
-const BARRA_AIRE = 10;
 
 /**
- * Donde se pone la barra de acciones, y si va volteada.
- *
- * Iba debajo del recorte, y si ahi no cabia, encima. Cuando el recorte es la pantalla
- * entera no cabe en ninguno de los dos sitios, y la cuenta la dejaba en `top: -10`: la
- * barra existia, con sus botones, y no se veia **ni un pixel** de ella. Ahora, cuando no
- * cabe fuera, se mete DENTRO del recorte pegada a su borde de abajo, que es lo que hacen
- * las demas herramientas de captura.
- *
- * Con `volteada`, el `top` que se devuelve es el borde de ABAJO de la barra, porque el
- * componente se sube a si mismo con `-translate-y-full`.
- */
-function sitioDeLaBarra(sel: Rect, alto: number) {
-  if (sel.y + sel.height + BARRA_AIRE + BARRA_ALTO <= alto) {
-    return { top: sel.y + sel.height + BARRA_AIRE, volteada: false };
-  }
-  if (sel.y - BARRA_AIRE - BARRA_ALTO >= 0) {
-    return { top: sel.y - BARRA_AIRE, volteada: true };
-  }
-  return { top: Math.min(alto, sel.y + sel.height) - BARRA_AIRE, volteada: true };
-}
-
-/**
- * Donde se pone la lupa para que NO tape el pixel que se esta mirando.
- *
- * Iba siempre abajo y a la derecha del cursor, y cerca de un borde solo se recortaba para
- * no salirse de la pantalla. En la esquina de abajo a la derecha eso la dejaba **encima
- * del propio cursor**: se capturaba a ciegas justo donde mas falta hace ver, que es lo que
- * conto Munir el 9 de septiembre de 2026 («cuando capturas una esquina no ves lo que estas
- * capturando»). Ahora se cambia de lado, como ya hacia la barra flotante: si no cabe a la
- * derecha va a la izquierda, y si no cabe abajo va arriba.
+ * Where the magnifier goes so it never covers the pixel being inspected: right of the cursor,
+ * else left; below, else above.
  */
 function sitioDeLaLupa(x: number, y: number, ancho: number, alto: number) {
   const cabeDerecha = x + LUPA_AIRE + LUPA_ANCHO <= ancho;
@@ -129,7 +98,7 @@ function applyHandle(base: Rect, handle: HandleId, x: number, y: number): Rect {
   return normalize(left, top, right, bottom);
 }
 
-/** Si un gesto de puntero nacio dentro de la barra de arriba. */
+/** Whether a pointer gesture started inside the mode bar. */
 function enLaBarra(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(SELECTOR_BARRA) !== null;
 }
@@ -139,14 +108,8 @@ function contains(rect: Rect, x: number, y: number): boolean {
 }
 
 /**
- * El fondo del overlay tapa la pantalla entera: si no se pinta, el usuario se
- * queda con un rectangulo negro encima de todo. Por eso hay dos vias.
- *
- * Las dos van por el IPC y salen de la memoria de Rust: ya no hay ningun archivo. La
- * normal trae la pantalla en PNG (dos o tres megabytes); llevarla en crudo, 8 MB por
- * pantalla, era el trozo mas gordo de todo el camino del atajo: 300-400 ms con tres
- * pantallas pidiendola a la vez. La de respaldo la trae sin comprimir, en BMP, por si el
- * PNG fallara.
+ * The overlay background covers the whole screen, so there are two ways to load it, both over
+ * IPC from Rust's memory: PNG normally, and an uncompressed BMP as a fallback.
  */
 async function loadFreeze(monitorId: number): Promise<Blob> {
   try {
@@ -154,7 +117,7 @@ async function loadFreeze(monitorId: number): Promise<Blob> {
     if (!bytes || bytes.byteLength === 0) throw new Error("el PNG ha llegado vacio");
     return new Blob([bytes], { type: "image/png" });
   } catch (pngError) {
-    console.warn("el PNG del congelado ha fallado, se pide sin comprimir", pngError);
+    console.warn("frozen-screen PNG failed, requesting uncompressed BMP", pngError);
     const bytes = await freezeBytes(monitorId);
     return new Blob([bytes], { type: "image/bmp" });
   }
@@ -167,113 +130,78 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   const [mode, setMode] = useState<Mode>({ kind: "idle" });
   const [cursor, setCursor] = useState({ x: 0, y: 0 });
   /**
-   * Si el raton esta en ESTA pantalla. Hay un overlay por monitor y todos pintaban la lupa,
-   * la cruceta, el resalte y la barra de modos: en el que no tenia el raton salian donde
-   * se quedo el cursor (o en la esquina, en (0, 0)). Solo los pinta el que lo tiene; el
-   * resto se queda con el velo.
+   * Whether the cursor is on THIS screen. Only that overlay draws the magnifier, crosshair,
+   * highlight, and mode bar; the others just show the dim layer.
    */
   const [cursorAqui, setCursorAqui] = useState(false);
   const [hex, setHex] = useState("#000000");
-  // El manejador de teclas se registra una vez, asi que lee el color por referencia: con
-  // el valor del cierre copiaria siempre el negro con el que arranca.
+  // The key handler is registered once, so it reads the color through a ref instead of a stale
+  // closure value.
   const hexRef = useRef(hex);
   hexRef.current = hex;
-  /** El ultimo color copiado, para poder decirlo. Se borra solo. */
+  /** The last copied color, shown briefly. */
   const [colorCopiado, setColorCopiado] = useState<string | null>(null);
   useEffect(() => {
     if (!colorCopiado) return;
     const id = setTimeout(() => setColorCopiado(null), 1600);
     return () => clearTimeout(id);
   }, [colorCopiado]);
-  /** Qué se hará con el recorte. Lo elige la barra de arriba, antes de recortar. */
+  /** What will be done with the selection, chosen in the mode bar before selecting. */
   const [modo, setModo] = useState<CaptureMode>("still");
-  /** Coger la pantalla entera de un clic, sin arrastrar. */
+  /** Capture the whole screen with one click. */
   const [target, setTarget] = useState<import("../../lib/types").CaptureTarget>("rectangle");
   const targetRef = useRef(target);
   targetRef.current = target;
   const [pantallaEntera, setPantallaEntera] = useState(false);
-  /**
-   * Si al soltar el recorte sale la barra para elegir que hacer con el.
-   *
-   * Es el ajuste `captureFlow` puesto donde se usa. Nace de los ajustes guardados y, al
-   * tocarlo aqui, se guarda alli: quien lo apaga una vez lo tiene apagado mannana, sin
-   * tener que acordarse de ir a la ventana de ajustes a cambiarlo de vuelta.
-   */
-  const [conBarra, setConBarra] = useState(true);
   const modoRef = useRef<CaptureMode>("still");
   modoRef.current = modo;
   const pantallaRef = useRef(false);
   pantallaRef.current = pantallaEntera;
-  const conBarraRef = useRef(true);
-  conBarraRef.current = conBarra;
 
   /**
-   * Cambia el estado de la barra en TODAS las pantallas.
-   *
-   * Hay un overlay por monitor y cada uno tiene su propio React, asi que tocar el boton
-   * aqui solo cambiaba esta pantalla. El evento vuelve tambien a quien lo manda, de modo
-   * que aplicar el cambio es cosa del listener y no hay dos caminos que mantener.
+   * Apply a mode change on ALL screens. Each monitor's overlay has its own React tree; the
+   * event also comes back to the sender, so the listener is the only code path.
    */
   const difundir = useCallback((cambio: Partial<OverlayModeState>) => {
     void emit(EVENTS.overlayMode, {
       target: cambio.target ?? targetRef.current,
       mode: cambio.mode ?? modoRef.current,
       fullScreen: cambio.fullScreen ?? pantallaRef.current,
-      withToolbar: cambio.withToolbar ?? conBarraRef.current,
     } satisfies OverlayModeState);
   }, []);
 
-  /**
-   * El interruptor de la barra de acciones: se enciende en todas las pantallas y se
-   * guarda en los ajustes.
-   *
-   * Se guarda con `setCaptureFlow` y no con `setSettings`: aquel reengancha los tres
-   * atajos globales y mira si hay que reiniciar el anillo cada vez que se llama, y esto
-   * se pulsa con la captura abierta delante.
-   */
-  const cambiarBarra = useCallback(
-    (valor: boolean) => {
-      difundir({ withToolbar: valor });
-      void setCaptureFlow(valor ? "toolbar" : "instant").catch((e) => {
-        // Que no se haya podido guardar no deshace lo que se acaba de encender: la
-        // captura de ahora sigue el interruptor igual, y lo unico que se pierde es que
-        // la proxima vez vuelva a nacer asi.
-        console.warn("no se ha podido guardar el perfil de captura", e);
-      });
-    },
-    [difundir],
-  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [source, setSource] = useState<HTMLCanvasElement | null>(null);
   const selectionRef = useRef<Rect | null>(null);
   selectionRef.current = selection;
-  /** El numero de ESTA pantalla, para saber si una orden por numero va con nosotros. */
+  /** THIS screen's number, to know whether a by-number command is for us. */
   const numeroPantalla = useRef(0);
 
   /**
-   * Donde se apreto el boton encima de la barra de arriba, mientras no se sepa que es.
-   *
-   * La barra ocupa una franja del centro de arriba y ahi no se podia empezar a recortar:
-   * se quedaba ella el `pointerdown`. Ahora el gesto se decide al moverse, que es la
-   * unica forma de que las dos cosas quepan en el mismo sitio: si el puntero se va, se
-   * recorta por debajo de la barra; si se suelta sin moverse, el clic es del boton.
+   * Where a press started on the mode bar, while it is undecided. Moving the pointer starts a
+   * selection underneath the bar; releasing without moving is a button click.
    */
   const origenBarra = useRef<{ x: number; y: number } | null>(null);
 
-  /** Pixeles fisicos por pixel CSS: el freeze manda, el webview puede estar escalado por DPI. */
+  /**
+   * Physical pixels per CSS pixel: the frozen image is authoritative; the webview may be DPI-
+   * scaled.
+   */
   const scale = useMemo(() => {
     if (!source) return 1;
     return source.width / Math.max(1, window.innerWidth);
   }, [source]);
 
-  /** Si el fondo ya esta dibujado en `source`. Hasta entonces, la pantalla de arranque. */
+  /**
+   * Whether the background has been drawn into `source`. Until then, the boot screen is shown.
+   */
   const [fondoListo, setFondoListo] = useState(false);
-  /** Donde se cuelga el lienzo con la pantalla congelada, que es el fondo que se ve. */
+  /** Container for the canvas with the frozen screen (the visible background). */
   const fondoRef = useRef<HTMLDivElement>(null);
 
-  /** Ventanas del sistema recortadas a este monitor, ya en coordenadas CSS locales. */
+  /** System windows clipped to this monitor, in local CSS coordinates. */
   const snapTargets = useMemo(
     () =>
       payload
@@ -288,13 +216,13 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     [payload, scale],
   );
 
-  /** La de delante bajo el punto, en orden Z (ver `ventanaBajoElPunto`). */
+  /** The front-most window under the point, by Z order (see `ventanaBajoElPunto`). */
   const windowAt = useCallback(
     (x: number, y: number) => ventanaBajoElPunto(snapTargets, x, y),
     [snapTargets],
   );
 
-  /** La ventana resaltada, en una referencia: la lee el oyente del teclado. */
+  /** The highlighted window, in a ref so the keyboard handler can read it. */
   const hoveredRef = useRef<VentanaDelSistema | null>(null);
 
   const hovered = useMemo(() => {
@@ -304,21 +232,18 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   hoveredRef.current = hovered;
 
   /**
-   * La ventana overlay se reutiliza entre capturas (ver `windows_mgr::open_overlays`): no
-   * se desmonta ni se remonta, asi que este arranque no puede depender solo del montaje
-   * inicial. `bootIdRef` distingue la invocacion vigente de una anterior que aun estuviera
-   * a medias, para que una llegada tardia de la vieja no pise el estado de la nueva.
+   * Overlay windows are reused between captures (see `windows_mgr::open_overlays`) and are not
+   * remounted, so boot cannot rely on the initial mount. `bootIdRef` identifies the current
+   * boot so a late result from an older one cannot overwrite the new state.
    */
   const bootIdRef = useRef(0);
 
   const boot = useCallback(async (payloadListo?: OverlayPayload) => {
     const miId = ++bootIdRef.current;
     const vigente = () => bootIdRef.current === miId;
-    const quien = payloadListo?.monitor.id ?? monitorId;
-    void cronoMarca(`js-evento-${quien}`);
 
-    // Se limpia lo de la vez anterior ANTES de pedir nada: si esta ventana se reutiliza,
-    // sin esto se veria un instante la captura vieja antes de que llegue la nueva.
+    // Clear the previous capture BEFORE requesting anything, so a reused window never flashes
+    // the old image.
     setPayload(null);
     setFondoListo(false);
     setSource(null);
@@ -326,24 +251,21 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     setMode({ kind: "idle" });
     setPantallaEntera(false);
     setBusy(false);
-    // `conBarra` NO se reinicia aqui: lo pone el payload unas lineas mas abajo con lo que
-    // digan los ajustes, y ponerlo a un valor de fabrica antes seria ensennar la barra
-    // encendida un instante a quien la tiene apagada.
+    // `conBarra` is not reset here: the payload sets it from the settings below, and resetting
+    // it first would briefly show the toolbar to users who turned it off.
     setError(null);
     setBootError(null);
     setCursorAqui(false);
 
     try {
-      // Cuando se reutiliza una ventana, el backend manda el payload ya hecho en el
-      // propio evento (ver EVENTS.overlayShow): pedirlo aparte por invoke seria una
-      // vuelta de IPC completa que no hace falta. Solo en el primer montaje, cuando
-      // nadie nos lo ha dado, se pide.
+      // For reused windows the backend sends the payload in the event (see EVENTS.overlayShow).
+      // It is only requested with invoke on the first mount.
       const data = payloadListo ?? (await overlayBootstrap(monitorId));
       if (!vigente()) return;
       setPayload(data);
       numeroPantalla.current = data.screenNumber;
-      // Donde esta el raton al abrir: si se queda quieto no llega ningun `pointermove`, y
-      // sin esto ninguna pantalla sabria que lo tiene hasta que se moviera.
+      // Where the cursor is at open time: without movement no `pointermove` arrives, and no
+      // screen would know it has the cursor.
       void cursorPosition()
         .then((p) => {
           const m = data.monitor;
@@ -355,25 +277,21 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
           setCursorAqui(true);
         })
         .catch(() => {});
-      // Quien pulsa el atajo de grabar quiere grabar: la barra abre en vídeo y ya.
+      // The record shortcut opens the overlay in video mode.
       setModo(data.intent === "record" ? "video" : "still");
       const initialTarget = (data.intent === "record" ? data.settings.recordTarget : data.settings.captureTarget) ?? "rectangle";
       setTarget(initialTarget);
       setPantallaEntera(initialTarget === "screen");
-      setConBarra(data.settings.captureFlow === "toolbar");
       void getCurrentWindow().setFocus();
 
-      // Aqui va el id de `data.monitor.id` (el de ESTA captura, siempre correcto),
-      // NUNCA el prop `monitorId` de la URL: esta ventana se reutiliza entre capturas
-      // (ver windows_mgr::open_overlays) y ese prop se fijo la primera vez que se creo,
-      // que puede no coincidir con el id actual si el orden de los monitores del sistema
-      // cambio entre medias. Pedir el id equivocado es ensennar el freeze de otro monitor.
+      // Use `data.monitor.id` (this capture's id), NEVER the `monitorId` prop from the URL: the
+      // window is reused and that prop was fixed at creation, which may no longer match if
+      // monitor order changed.
       const blob = await loadFreeze(data.monitor.id);
       if (!vigente()) return;
-      void cronoMarca(`js-bytes-${quien}`);
 
-      // Un solo lienzo hace de fondo y de fuente para la lupa: decodificar una vez, no dos
-      // (antes el fondo era un <img> con su propia decodificacion ademas de esta).
+      // One canvas serves as both background and magnifier source, so the image is decoded
+      // once.
       const bitmap = await createImageBitmap(blob);
       if (!vigente()) return;
       const canvas = document.createElement("canvas");
@@ -384,7 +302,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       bitmap.close?.();
       setSource(canvas);
       setFondoListo(true);
-      void cronoMarca(`js-canvas-${quien}`);
     } catch (e) {
       if (vigente()) setBootError(String(e));
     }
@@ -394,8 +311,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     void boot();
   }, [boot]);
 
-  // El lienzo con la pantalla congelada se cuelga en el DOM a mano: React no lo redibuja,
-  // y asi el mismo elemento que lee la lupa es el que se ve.
+  // The frozen-screen canvas is attached to the DOM manually so React never redraws it and the
+  // magnifier reads the same element that is shown.
   useLayoutEffect(() => {
     const hueco = fondoRef.current;
     if (!hueco || !source || !fondoListo) return;
@@ -406,14 +323,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   }, [source, fondoListo]);
 
   /**
-   * Con el fondo colgado, se le dice a Rust que ya puede ensennar esta ventana: hasta
-   * entonces esta aparcada fuera de las pantallas y nadie ve la pantalla de carga.
-   *
-   * Se espera al siguiente cuadro (`requestAnimationFrame`), que es el que lleva el lienzo
-   * recien colgado: para cuando Rust reciba el aviso y mueva la ventana, ese cuadro ya
-   * esta pintado. Con dos cuadros se esperaba de mas (medido: 16 ms). Y un navegador
-   * aparcado fuera de las pantallas puede no pintar cuadros: si en 30 ms no ha llegado
-   * ninguno, se avisa igual.
+   * With the background attached, tell Rust it can show this window (it stays parked off-screen
+   * until then). Waits for the next animation frame, which contains the new canvas; a parked
+   * webview may not paint frames, so it notifies anyway after 30 ms.
    */
   useEffect(() => {
     if (!fondoListo || !payload) return;
@@ -423,7 +335,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     const avisar = () => {
       if (avisado) return;
       avisado = true;
-      void cronoMarca(`js-pintado-${id}`);
       void overlayListo(id, generacion);
     };
     const uno = requestAnimationFrame(avisar);
@@ -434,19 +345,11 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     };
   }, [fondoListo, payload]);
 
-  // La ventana ya estaba montada de una captura anterior: no llega un remontaje que
-  // dispare el arranque solo, asi que el backend lo pide explicitamente por evento, con
-  // el payload de la captura nueva ya dentro.
+  // Reused windows get no remount, so the backend sends a show event with the new payload.
   //
-  // `target` NO es opcional aqui, aunque el tipo lo deje pasar. Sin el, `listen` se
-  // registra como `{ kind: 'Any' }` y eso significa recibir TODO lo que se emita, incluso
-  // lo que iba dirigido a otra ventana (@tauri-apps/api/event.d.ts: "defaults to
-  // { kind: 'Any' }"). Con un overlay por monitor, cada ventana recibia tambien los
-  // payloads de las otras dos y se quedaba con el ultimo del bucle de `open_overlays`:
-  // las tres acababan pintando y recortando la misma pantalla. Arreglarlo en Rust con
-  // `emit_to` era necesario y no bastaba, porque el que se apuntaba a todo era este lado.
-  // Se pasa la etiqueta como cadena a proposito: asi los dos lados usan `AnyLabel` con la
-  // misma etiqueta y coinciden sin depender de que tipo de destino sea cada uno.
+  // `target` is NOT optional here: without it `listen` registers for every event, including
+  // those for other windows, and all overlays ended up showing the same screen. The label is
+  // passed as a string so both sides use `AnyLabel` with the same label.
   useEffect(() => {
     const etiqueta = getCurrentWindow().label;
     const unlisten = listen<OverlayPayload>(EVENTS.overlayShow, (e) => void boot(e.payload), {
@@ -479,12 +382,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   );
 
   /**
-   * La ultima region capturada, traida a coordenadas CSS de ESTA pantalla, o null si fue
-   * en otra. Es la vuelta de `toPhysical`: el payload la trae en coordenadas del
-   * escritorio virtual justamente porque puede no ser de aqui.
-   *
-   * Se mira por el centro, igual que hace Rust al decidir de que pantalla recorta, para
-   * que las dos mitades esten de acuerdo sobre de quien es una region.
+   * The last captured region in THIS screen's CSS coordinates, or null if it was on another
+   * screen. Judged by the center, like Rust when choosing which screen to crop from.
    */
   const ultimaRegion = useMemo(() => {
     const r = payload?.lastRegion;
@@ -512,29 +411,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     [busy],
   );
 
-  const runStill = useCallback(
-    async (action: StillAction) => {
-      if (!selection) return;
-      await capturarRegion(selection, action);
-    },
-    [selection, capturarRegion],
-  );
-
   /**
-   * Perfil al vuelo: se suelta el raton y ya esta, sin barra y sin un solo clic mas. En
-   * foto eso es la imagen en el portapapeles; en video o GIF, la grabacion arrancando.
-   * Con el otro perfil sale la barra, que ademas deja ajustar el recuadro antes: grabando
-   * eso importa mas que en una foto, porque lo que salga mal se ve minutos despues.
-   */
-  const alVuelo = !conBarra;
-
-
-
-  /**
-   * Graba LA VENTANA de debajo del cursor, no el trozo de pantalla donde está.
-   *
-   * La diferencia se ve en cuanto algo pasa por delante: grabando la región, un aviso que
-   * salta encima acaba dentro del vídeo; pidiéndole a Windows esa ventana, no.
+   * Record THE WINDOW under the cursor rather than the screen area it occupies, so anything
+   * passing in front of it stays out of the video.
    */
   const grabarVentana = useCallback(
     async (ventana: VentanaDelSistema, format: "video") => {
@@ -544,7 +423,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       try {
         await startRecording(toPhysical(ventana.rect), {
           format,
-          fps: payload.settings.fps,
           audio: payload.settings.recordAudio && format === "video",
           microphone: payload.settings.recordMicrophone && format === "video",
           window: ventana.hwnd,
@@ -566,13 +444,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       try {
         await startRecording(toPhysical(rect), {
           format,
-          fps: payload.settings.fps,
-          // El interruptor de audio del overlay se fue con la barra vieja: mientras el
-          // ajuste diga "todavia no disponible", esto es siempre false.
           audio: payload.settings.recordAudio && format === "video",
-          // El GIF no lleva sonido, asi que el microfono tampoco tiene sentido ahi.
           microphone: payload.settings.recordMicrophone && format === "video",
-          // Los aros si valen igual en GIF: el fotograma es el mismo.
         });
       } catch (e) {
         setError(String(e));
@@ -583,136 +456,60 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     [payload, busy, toPhysical],
   );
 
-  const nudge = useCallback((dx: number, dy: number, resize: boolean) => {
-    setSelection((prev) => {
-      if (!prev) return prev;
-      if (resize) {
-        return {
-          ...prev,
-          width: Math.max(2, prev.width + dx),
-          height: Math.max(2, prev.height + dy),
-        };
-      }
-      return { ...prev, x: prev.x + dx, y: prev.y + dy };
-    });
-  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const step = e.shiftKey ? 10 : 1;
       switch (e.key) {
         case "Escape":
           e.preventDefault();
-          // Un solo Escape se sale, haya recorte hecho o no. Antes el primero borraba el
-          // recorte y hacia falta otro para cerrar: quien pulsa Escape encima de una
-          // captura quiere irse, y el recorte se rehace arrastrando otra vez, sin tener
-          // que borrarlo antes.
+          // One Escape always exits, with or without a selection; a new selection can be
+          // dragged without clearing the old one.
           void cancelCapture();
-          return;
-        case "Enter":
-          e.preventDefault();
-          // Enter hace lo que diga la barra de arriba: copiar la foto, o empezar a grabar.
-          if (modo !== "still") {
-            if (selectionRef.current) void grabarRegion(selectionRef.current, modo);
-          } else {
-            void runStill("copy");
-          }
-          return;
-        case "ArrowLeft":
-          e.preventDefault();
-          nudge(-step, 0, e.altKey);
-          return;
-        case "ArrowRight":
-          e.preventDefault();
-          nudge(step, 0, e.altKey);
-          return;
-        case "ArrowUp":
-          e.preventDefault();
-          nudge(0, -step, e.altKey);
-          return;
-        case "ArrowDown":
-          e.preventDefault();
-          nudge(0, step, e.altKey);
           return;
       }
       const key = e.key.toLowerCase();
-      if (key === "s" && e.ctrlKey && e.shiftKey) {
-        e.preventDefault();
-        void runStill("save_as");
-      } else if (key === "s" && e.ctrlKey) {
-        e.preventDefault();
-        void runStill("save");
-      } else if (key === "a" && e.ctrlKey) {
+      if (key === "a" && e.ctrlKey) {
         e.preventDefault();
         const todo = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
-        if (!alVuelo) setSelection(todo);
-        else if (modo !== "still") void grabarRegion(todo, modo);
+        if (modo !== "still") void grabarRegion(todo, modo);
         else void capturarRegion(todo, "copy");
-
-      } else if (key === "a") {
-        // Anclar. `Ctrl+A` de aqui arriba es otra cosa (toda la pantalla), y no chocan:
-        // la letra sola actua sobre el recorte y con Ctrl cambia lo que se recorta.
-        void runStill("pin");
-      } else if (key === "t") {
-        // El texto de la captura al portapapeles, leido por el motor de Windows.
-        void runStill("text");
       } else if (key === "c") {
-        // El color que hay debajo del cursor. La lupa ya lo ensennaba y no habia forma de
-        // llevarselo; asi el cuentagotas no es una herramienta mas, es una tecla.
-        //
-        // No cierra la seleccion: quien esta cogiendo un color suele coger varios, y
-        // cerrar despues del primero obligaria a volver a lanzar el atajo cada vez.
+        // Copy the color under the cursor. Does not close the selection, since people often
+        // pick several colors.
         void copyColor(hexRef.current)
           .then(() => setColorCopiado(hexRef.current))
           .catch((err) => setError(String(err)));
       } else if (key === "p") {
         difundir({ fullScreen: !pantallaRef.current });
-      } else if (key === "b") {
-        // La barra de acciones, encendida o apagada. Con `Alt` no: es una letra sola como
-        // las demas de aqui, y el `b` de "barra" no lo usa nada mas.
-        cambiarBarra(!conBarraRef.current);
       } else if (key === "f") {
         difundir({ mode: "still" });
-
       } else if (key === "v") {
         difundir({ mode: "video" });
       } else if (key === "w") {
-        // Grabar SOLO la ventana de debajo, se tape o no se tape. Es una tecla y no un
-        // boton porque solo tiene sentido mientras hay una ventana resaltada debajo del
-        // raton, que es justo cuando no se esta mirando ninguna barra.
+        // Record ONLY the window under the cursor, even if covered. A key rather than a button
+        // because it only makes sense while a window is highlighted.
         const debajo = hoveredRef.current;
         if (!debajo?.hwnd) return;
         e.preventDefault();
         void grabarVentana(debajo, "video");
       } else if (key === "r") {
-        // La misma zona otra vez, sin volver a arrastrar. Solo responde la pantalla donde
-        // cayo aquella region: en las demas no hay nada que repetir, asi que no hacen nada
-        // en vez de capturar algo que no es.
+        // Repeat the last region without dragging. Only the screen where that region was
+        // responds.
         const previa = ultimaRegionRef.current;
         if (!previa) return;
         e.preventDefault();
-        // Mismo reparto que `Ctrl+A`: con la barra se deja puesta para retocarla, y con el
-        // perfil "se copia sola" se hace y ya, que es lo que ese perfil promete.
-        if (!alVuelo) setSelection(previa);
-        else if (modoRef.current !== "still") void grabarRegion(previa, modoRef.current);
+        if (modoRef.current !== "still") void grabarRegion(previa, modoRef.current);
         else void capturarRegion(previa, "copy");
       } else if (key === "0") {
-        // Todas las pantallas de golpe, en una sola imagen. El `0` va con los numeros de
-        // pantalla y significa "ninguna en concreto: todas".
-        //
-        // Esta no necesita ir por evento como las otras: no hay que decidir a que ventana
-        // le toca, porque Rust las junta todas leyendo las capturas congeladas. La que
-        // tiene el foco la pide y ya.
-        //
-        // Solo tiene sentido en foto: grabar es de una region de una pantalla, asi que en
-        // video o GIF esta tecla no hace nada en vez de hacer algo raro.
+        // All screens at once, in one image. `0` goes with the screen numbers and means "all".
+        // Rust stitches the frozen screens, so the focused overlay requests it directly.
+        // Screenshots only; does nothing in video mode.
         if (modoRef.current !== "still") return;
         e.preventDefault();
         void capturarTodasLasPantallas("copy");
       } else if (key >= "1" && key <= "9") {
-        // El numero que se ve en cada pantalla es la tecla que se la lleva. La orden va
-        // por evento porque la tecla solo llega a la pantalla que tiene el foco, y casi
-        // nunca es la que se quiere capturar.
+        // The number shown on each screen is the key that captures it. Sent as an event because
+        // keys only reach the focused screen, which is rarely the one wanted.
         e.preventDefault();
         void emit(EVENTS.overlayTakeScreen, Number(key));
       }
@@ -720,15 +517,11 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    runStill,
-    nudge,
-    alVuelo,
     modo,
     capturarRegion,
     capturarTodasLasPantallas,
     grabarRegion,
     difundir,
-    cambiarBarra,
   ]);
 
   const readHex = useCallback(
@@ -745,8 +538,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
     [source, scale],
   );
 
-  // Durante el gesto los eventos se escuchan en window, no en el div: asi el arrastre
-  // no se pierde aunque el webview no conceda la captura de puntero.
+  // During a gesture listen on window, not the div, so the drag is not lost if the webview
+  // denies pointer capture.
   useEffect(() => {
     if (mode.kind === "idle") return;
 
@@ -755,8 +548,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       const y = e.clientY;
       setCursor({ x, y });
       if (mode.kind === "drawing") {
-        // La lupa sigue en pantalla mientras se dibuja, asi que el color tiene
-        // que seguir al cursor en vez de quedarse en el del primer clic.
+        // The magnifier stays visible while dragging, so the color follows the cursor.
         readHex(x, y);
         setSelection(normalize(mode.originX, mode.originY, x, y));
       } else if (mode.kind === "moving") {
@@ -775,14 +567,13 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       if (mode.kind === "drawing") {
         const drawn = selectionRef.current;
         const dibujado = drawn && drawn.width >= MIN_DRAG && drawn.height >= MIN_DRAG;
-        // Clic seco: si hay una ventana debajo, se selecciona entera (estilo ShareX).
+        // Plain click: if there is a window underneath, select all of it.
         if (!dibujado) setSelection(mode.candidate);
         const elegido = dibujado ? drawn : mode.candidate;
-        // Al soltar manda el modo elegido arriba: grabar empieza aqui mismo, y la foto
-        // solo se copia sola si ese es el perfil. Si no, sale la barra de la seleccion.
+        // On release: start recording, or copy the screenshot to the clipboard.
         if (elegido) {
           if (modo !== "still") void grabarRegion(elegido, modo);
-          else if (alVuelo) void capturarRegion(elegido, "copy");
+          else void capturarRegion(elegido, "copy");
         }
       }
       setMode({ kind: "idle" });
@@ -796,9 +587,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [mode, readHex, alVuelo, modo, capturarRegion, grabarRegion]);
+  }, [mode, readHex, modo, capturarRegion, grabarRegion]);
 
-  /** Se lleva esta pantalla entera con lo que diga la barra: foto, video o GIF. */
+  /** Take this whole screen using the current mode: screenshot or video. */
   const llevarsePantalla = useCallback(async () => {
     const todo = {
       x: 0,
@@ -807,26 +598,18 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       height: window.innerHeight,
     };
     difundir({ fullScreen: false });
-    // Con la barra puesta, la pantalla entera es una SELECCION, no una captura. Quien
-    // elige ese perfil quiere decidir despues: copiar, guardar, editar o anclar. Antes se
-    // la llevaba al portapapeles y cerraba, y la barra no aparecia nunca; `Ctrl+A`, que
-    // hace exactamente lo mismo, si la ensennaba. Dos caminos al mismo sitio no pueden
-    // acabar en dos sitios distintos. Lo conto Munir el 9 de septiembre de 2026.
-    if (conBarraRef.current) {
-      setSelection(todo);
-      return;
-    }
     if (modoRef.current !== "still") await grabarRegion(todo, modoRef.current);
     else await capturarRegion(todo, "copy");
   }, [difundir, capturarRegion, grabarRegion]);
 
-  // Las dos ordenes que llegan de las otras pantallas: que cambie la barra, y que esta
-  // pantalla en concreto se capture entera porque alguien pulso su numero.
+  // Commands from other screens: a mode change, or capture this whole screen because its number
+  // was pressed.
   useEffect(() => {
     const modos = listen<OverlayModeState>(EVENTS.overlayMode, ({ payload: p }) => {
       setModo(p.mode);
       setPantallaEntera(p.fullScreen);
-      setConBarra(p.withToolbar);
+      // Another screen applied a preset: refresh the settings this overlay records with.
+      if (p.preset !== undefined) void getSettings().then((s) => setPayload((old) => (old ? { ...old, settings: s } : old)));
       setTarget(p.fullScreen ? "screen" : p.target === "window" ? "window" : "rectangle");
       if (p.fullScreen) setSelection(null);
     });
@@ -841,16 +624,13 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (busy) return;
-    // Lo que nace encima de la barra todavia no es nada: se apunta donde empezo y se
-    // espera a ver si el puntero se mueve (recorte por debajo) o se suelta (clic del
-    // boton). Ver `origenBarra`.
+    // A press on the mode bar is undecided: remember where it started and wait to see whether
+    // the pointer moves (select underneath) or is released (button click). See `origenBarra`.
     if (enLaBarra(e.target)) {
       origenBarra.current = { x: e.clientX, y: e.clientY };
       return;
     }
-    // Con "pantalla entera" puesto no hay nada que arrastrar: donde caiga el clic, esa
-    // pantalla se lleva, y se lleva YA. Un clic es un clic, tambien con el perfil de la
-    // barra: quien pide la pantalla entera ya ha dicho lo que quiere.
+    // In full-screen mode there is nothing to drag: the clicked screen is captured immediately.
     if (pantallaEntera) {
       void llevarsePantalla();
       return;
@@ -862,7 +642,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       if (!candidate) return;
       setSelection(candidate.rect);
       if (modo !== "still") void grabarRegion(candidate.rect, modo);
-      else if (alVuelo) void capturarRegion(candidate.rect, "copy");
+      else void capturarRegion(candidate.rect, "copy");
       return;
     }
     const current = selectionRef.current;
@@ -877,9 +657,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
   const onPointerMove = (e: React.PointerEvent) => {
     const desdeLaBarra = origenBarra.current;
     if (desdeLaBarra) {
-      // `buttons` a cero es que ya se solto: aquello era un clic de la barra y este
-      // movimiento no arrastra nada. Sin esta linea, mover el raton despues de pulsar un
-      // boton se ponia a dibujar un recorte solo.
+      // `buttons` is zero once released: that was a mode-bar click and this move must not start
+      // a selection.
       if (e.buttons === 0 || pantallaEntera || busy) {
         origenBarra.current = null;
       } else if (
@@ -887,8 +666,7 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         Math.abs(e.clientY - desdeLaBarra.y) >= MIN_DRAG
       ) {
         origenBarra.current = null;
-        // Sin candidata: quien arrastra desde la barra quiere SU recorte, no la ventana
-        // que haya debajo.
+        // No window snapping: dragging from the mode bar means a custom selection.
         setMode({
           kind: "drawing",
           originX: desdeLaBarra.x,
@@ -914,7 +692,6 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       ? selection
       : null;
   const highlight = !active && hovered ? hovered : null;
-  const sitioBarra = active ? sitioDeLaBarra(active, window.innerHeight) : null;
   const magnifierVisible =
     cursorAqui &&
     payload.settings.showMagnifier &&
@@ -930,15 +707,14 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       className="relative h-screen w-screen overflow-hidden"
       style={{ cursor: pantallaEntera ? "pointer" : active ? "default" : "crosshair" }}
     >
-      {/* El fondo: el lienzo con la pantalla congelada, colgado aqui por el efecto de
-          arriba. Un lienzo y no un <img>, para decodificar la imagen una sola vez. */}
+      {/* The background: the frozen-screen canvas attached by the effect above. A canvas rather
+         than an <img> so the image is decoded once. */}
       <div ref={fondoRef} className="pointer-events-none absolute inset-0" />
 
-      {/* Sin seleccion: velo uniforme. Con seleccion: el velo lo dibuja la sombra del recuadro. */}
+      {/* No selection: uniform dim layer. With a selection, the box's shadow draws it. */}
       {!active && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
 
-      {/* La ventana de debajo del cursor, con su nombre: el marco solo, y encima azul
-          fuerte, no decia de que era ni que se le podia hacer clic. */}
+      {/* The window under the cursor, with its title. */}
       {highlight && (
         <div
           style={{
@@ -951,18 +727,14 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         >
           {highlight.title && (
             <span
-              // Fuera del marco cuando cabe: dentro se pone justo encima de la barra de
-              // titulo de la ventana y se leen dos titulos pisados uno sobre otro.
+              // Outside the box when it fits; inside it would overlap the window's title bar.
               className={`absolute left-0 max-w-[min(360px,100%)] truncate rounded-md bg-neutral-900/90 px-2 py-1 text-[13px] text-neutral-200 shadow-lg backdrop-blur-sm ${
                 highlight.rect.y > 28 ? "-top-7" : "top-1.5 left-1.5"
               }`}
             >
               {highlight.title}
-              {/*
-                La pista de la tecla, solo grabando y solo si Windows nos da esa ventana.
-                Va pegada al titulo porque es ahi donde se esta mirando: una leyenda en una
-                esquina de la pantalla no la lee nadie con el raton al otro lado.
-              */}
+              {/* Key hint for recording just this window, only in video mode and when Windows
+                 provides the window handle. */}
               {modo !== "still" && highlight.hwnd > 0 && (
                 <span className="ml-2 rounded bg-white/15 px-1.5 py-0.5 text-[12px] font-semibold text-white">
                   {t("W: record just this window")}
@@ -998,13 +770,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         </>
       )}
 
-      {/*
-        La cruceta: dos guias que cruzan la pantalla por donde esta el cursor. Alinear el
-        borde de una seleccion con algo que esta al otro lado de la pantalla se hacia a
-        ojo; con la guia se ve si estan en la misma linea antes de soltar.
-        Se pinta cuando se pinta la lupa, que es cuando hace falta precision, y desaparece
-        con la seleccion hecha para no ensuciar lo que se esta mirando.
-      */}
+      {/* Crosshair guides through the cursor, for aligning a selection edge with something
+         across the screen. Shown together with the magnifier and hidden once a selection
+         exists. */}
       {magnifierVisible && (
         <div className="pointer-events-none absolute inset-0 z-30">
           <div
@@ -1029,31 +797,9 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       )}
 
       <AnimatePresence>
-        {active && mode.kind === "idle" && !alVuelo && (
-          <FloatingToolbar
-            key="toolbar"
-            left={clamp(active.x + active.width / 2, 190, window.innerWidth - 190)}
-            top={sitioBarra!.top}
-            flipped={sitioBarra!.volteada}
-            busy={busy}
-            modo={modo}
-            onCopy={() => void runStill("copy")}
-            onSave={() => void runStill("save")}
-            onSaveAs={() => void runStill("save_as")}
-            onPin={() => void runStill("pin")}
-            onText={() => void runStill("text")}
-            onRecord={() => {
-              if (selection && modo !== "still") void grabarRegion(selection, modo);
-            }}
-            onCancel={() => void cancelCapture()}
-          />
-        )}
       </AnimatePresence>
 
-      {/*
-        El color copiado. Va donde los errores y con la misma forma, porque es lo mismo:
-        algo que acaba de pasar y que hay que contar sin tapar la pantalla.
-      */}
+      {/* The copied color, shown like errors: a brief notice that does not cover the screen. */}
       {colorCopiado && !error && (
         <div className="pointer-events-none absolute inset-x-0 top-8 flex justify-center">
           <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-neutral-900/90 px-4 py-2.5 text-xs text-neutral-200 shadow-2xl backdrop-blur-md">
@@ -1070,20 +816,14 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
       {error && (
         <div className="pointer-events-none absolute inset-x-0 top-8 flex justify-center">
           <div className="max-w-xl rounded-xl border border-red-500/30 bg-red-950/90 px-4 py-2.5 text-xs text-red-200 shadow-2xl backdrop-blur-md">
-            {/* Los errores llegan de Rust escritos en espannol. Como la clave del
-                diccionario ES la frase espannola, pasarlos por `t` traduce los que
-                alguien ha traducido y deja el resto tal cual, que es mejor que verlos
-                todos en castellano con la aplicacion en ingles. */}
+            {/* Error text from Rust is shown as-is. */}
             {t(error)}
           </div>
         </div>
       )}
 
-      {/*
-        El fantasma de la ultima captura, donde estuvo, con su tecla encima. Una tecla que
-        no se ve no la usa nadie, y esto se explica solo: ahi tenias lo de antes, pulsa R y
-        vuelve. Se va en cuanto se empieza a arrastrar, para no estorbar.
-      */}
+      {/* Outline of the last capture with its key (R), to repeat it. Hidden once dragging
+         starts. */}
       {cursorAqui &&
         ultimaRegion &&
         !selection &&
@@ -1118,9 +858,8 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
         />
       )}
 
-      {/* La barra de modos, solo en la pantalla del raton: dos barras iguales, una en cada
-          monitor, parecen dos capturas abiertas. Al elegir pantalla entera se ve en todas,
-          que es justo cuando se elige entre ellas. */}
+      {/* The mode bar, only on the cursor's screen; in full-screen mode it shows on every
+         screen so one can be picked. */}
       {(cursorAqui || pantallaEntera) && (
         <ModeBar
           value={modo}
@@ -1129,8 +868,17 @@ export function SelectionCanvas({ monitorId }: { monitorId: number }) {
           onTarget={v => { setSelection(null); difundir({ target: v, fullScreen: v === "screen" }); }}
           pantallaEntera={pantallaEntera}
           onPantallaEntera={(v) => difundir({ fullScreen: v })}
-          conBarra={conBarra}
-          onConBarra={cambiarBarra}
+          presets={(payload.settings.presets ?? []).map((p) => ({ name: p.name, summary: presetSummary(p) }))}
+          activePreset={payload.settings.activePreset}
+          activeSummary={presetSummary(payload.settings)}
+          onPreset={(name) => {
+            void applyPreset(name)
+              .then((s) => {
+                setPayload((p) => (p ? { ...p, settings: s } : p));
+                difundir({ preset: name });
+              })
+              .catch((e) => setError(String(e)));
+          }}
           onAjustes={() => void openSettings()}
           onCancel={() => void cancelCapture()}
           dimmed={mode.kind !== "idle"}

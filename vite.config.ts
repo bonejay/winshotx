@@ -5,7 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-// La version se escribe UNA vez, en package.json, y de ahi baja al pie de los ajustes.
+// The version is written once, in package.json.
 const paquete = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
 
 export default defineConfig({
@@ -17,9 +17,8 @@ export default defineConfig({
     strictPort: true,
     watch: { ignored: ["**/src-tauri/**"] },
   },
-  // El banco de pruebas del frontend. Corre con el MISMO Vite que compila la aplicacion,
-  // asi que lo que pasa una prueba se comporta igual dentro de la ventana: mismos alias,
-  // mismo `__VERSION__`, mismo Tailwind. Un empaquetador aparte se habria desincronizado.
+  // Frontend tests run on the same Vite config as the app, with the same aliases,
+  // `__VERSION__`, and Tailwind.
   test: {
     environment: "happy-dom",
     globals: true,
@@ -34,7 +33,6 @@ export default defineConfig({
         overlay: resolve(__dirname, "overlay.html"),
         recorder: resolve(__dirname, "recorder.html"),
         cuenta: resolve(__dirname, "cuenta.html"),
-        pin: resolve(__dirname, "pin.html"),
       },
     },
   },

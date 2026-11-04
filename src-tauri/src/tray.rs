@@ -11,7 +11,8 @@ pub fn build(app: &AppHandle) -> Result<()> {
         .text("capture", "Take a screenshot")
         .text("record", "Start / stop recording")
         .separator()
-        .text("folder", "Open capture folder")
+        .text("folder", "Open screenshot folder")
+        .text("video-folder", "Open video folder")
         .text("settings", "Settings")
         .separator()
         .text("quit", "Quit WinShotX")
@@ -28,7 +29,7 @@ pub fn build(app: &AppHandle) -> Result<()> {
                 ..
             } = event
             {
-                let _ = windows_mgr::open_overlays(tray.app_handle(), OverlayIntent::Capture);
+                let _ = windows_mgr::show_settings(tray.app_handle());
             }
         });
     if let Some(icon) = app.default_window_icon() {
@@ -38,12 +39,8 @@ pub fn build(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// Lo que hace cada entrada del menu, en un solo sitio.
-///
-/// Lo llaman el menu dibujado (`tray_menu.rs`, por el comando `tray_menu_action`) y el
-/// menu del sistema, que sigue existiendo de reserva. Estaba escrito dentro del manejador
-/// del menu nativo, y dejarlo ahi habria significado dos listas de acciones que se
-/// separarian al primer cambio.
+/// Runs a tray menu action. Shared by the native tray menu and the `tray_menu_action` command
+/// used by the settings window.
 pub fn ejecutar(app: &AppHandle, id: &str) {
     match id {
         "capture" => {
@@ -56,23 +53,23 @@ pub fn ejecutar(app: &AppHandle, id: &str) {
                 let _ = windows_mgr::open_overlays(app, OverlayIntent::Record);
             }
         }
-        // Donde acaban las capturas guardadas. Sin esto habia que abrir los ajustes
-        // para llegar a una carpeta que se visita todos los dias.
-        "folder" => {
-            let carpeta = app
-                .state::<AppState>()
-                .settings
-                .read()
-                .save_directory
-                .clone();
+        // Open the screenshot or video folder.
+        "folder" | "video-folder" => {
+            let carpeta = {
+                let state = app.state::<AppState>();
+                let settings = state.settings.read();
+                if id == "folder" {
+                    settings.save_directory.clone()
+                } else {
+                    settings.video_directory.clone()
+                }
+            };
             let _ = std::fs::create_dir_all(&carpeta);
             let _ = crate::platform::open_folder(&std::path::PathBuf::from(carpeta));
         }
         "settings" => {
             let _ = windows_mgr::show_settings(app);
         }
-        // La comprobacion vive en la ventana de ajustes: desde la bandeja se
-        // abre y se le dice que mire, para no tener dos caminos distintos.
         "quit" => app.exit(0),
         _ => {}
     }

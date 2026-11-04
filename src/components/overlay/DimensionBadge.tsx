@@ -1,8 +1,8 @@
 interface Props {
-  /** Ya en pixeles fisicos, que es lo que el usuario espera leer. */
+  /** Already in physical pixels, which is what the user expects to read. */
   width: number;
   height: number;
-  /** Posicion en coordenadas CSS del overlay. */
+  /** Position in overlay CSS coordinates. */
   left: number;
   top: number;
   editable?: boolean;

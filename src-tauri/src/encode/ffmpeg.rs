@@ -1,10 +1,9 @@
-use std::path::Path;
 use std::process::Command;
 
 use crate::error::{AppError, Result};
 
 #[cfg(windows)]
-const NO_WINDOW: u32 = 0x0800_0000; // CREATE_NO_WINDOW: nada de consolas parpadeando
+const NO_WINDOW: u32 = 0x0800_0000; // CREATE_NO_WINDOW: no flashing console windows
 
 pub(crate) fn command(executable: &str) -> Command {
     let mut cmd = Command::new(executable);
@@ -14,11 +13,6 @@ pub(crate) fn command(executable: &str) -> Command {
         cmd.creation_flags(NO_WINDOW);
     }
     cmd
-}
-
-/// FFmpeg nunca se empaqueta: solo se usa si el usuario ya lo tiene en el PATH.
-pub fn available() -> bool {
-    available_at("ffmpeg")
 }
 
 pub fn available_at(executable: &str) -> bool {
@@ -82,19 +76,6 @@ pub fn info(executable: &str) -> FfmpegInfo {
         encoders,
         error: None,
     }
-}
-
-fn run_at(args: &[String], executable: &str) -> Result<()> {
-    let output = command(executable)
-        .args(args)
-        .output()
-        .map_err(|e| AppError::Msg(format!("Could not run FFmpeg: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let tail: String = stderr.lines().rev().take(4).collect::<Vec<_>>().join(" | ");
-        return Err(AppError::Msg(format!("FFmpeg failed: {tail}")));
-    }
-    Ok(())
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -174,21 +155,6 @@ pub fn test_encoding(
     result.map_err(|e: AppError| AppError::Msg(format!("Encoder test failed: {e}")))
 }
 
-pub fn mp4_from_video(
-    source: &Path,
-    destination: &Path,
-    fps: u32,
-    width: u32,
-    height: u32,
-    quality: u8,
-    options: &crate::settings::EncodingSettings,
-) -> Result<()> {
-    run_at(
-        &mp4_args(source, destination, fps, width, height, quality, options)?,
-        &options.ffmpeg_path,
-    )
-}
-
 pub fn validate(options: &crate::settings::EncodingSettings) -> Result<()> {
     if !["crf", "bitrate"].contains(&options.rate_control.as_str()) || options.crf > 51 {
         return Err(AppError::Msg(
@@ -238,36 +204,6 @@ pub fn validate(options: &crate::settings::EncodingSettings) -> Result<()> {
     let _: Vec<String> = serde_json::from_str(&options.extra_args)
         .map_err(|_| AppError::Msg("FFmpeg arguments must be a JSON array of strings.".into()))?;
     Ok(())
-}
-
-/// Construct an argument vector, never a shell command. Custom output arguments win.
-fn mp4_args(
-    source: &Path,
-    destination: &Path,
-    fps: u32,
-    width: u32,
-    height: u32,
-    quality: u8,
-    options: &crate::settings::EncodingSettings,
-) -> Result<Vec<String>> {
-    validate(options)?;
-    let _ = quality;
-    let mut args = vec![
-        "-y".into(),
-        "-nostdin".into(),
-        "-i".into(),
-        source.to_string_lossy().into_owned(),
-        "-vf".into(),
-        format!("fps={fps},scale={width}:{height}:flags=lanczos"),
-        "-movflags".into(),
-        "+faststart".into(),
-    ];
-    args.extend(codec_args(options)?);
-    let extra: Vec<String> = serde_json::from_str(&options.extra_args)
-        .map_err(|_| AppError::Msg("Invalid FFmpeg arguments.".into()))?;
-    args.extend(extra);
-    args.push(destination.to_string_lossy().into_owned());
-    Ok(args)
 }
 
 pub(crate) fn codec_args(options: &crate::settings::EncodingSettings) -> Result<Vec<String>> {
@@ -337,111 +273,16 @@ mod tests {
             .to_string()
             .contains("Encoder test failed"));
     }
-    #[test]
-    #[ignore = "Requires an installed FFmpeg executable"]
-    fn live_custom_path_quality_audio_and_120_fps_export() {
-        let options = EncodingSettings::default();
-        let report = info(&options.ffmpeg_path);
-        assert!(report.available, "{:?}", report.error);
-        assert!(report.encoders.contains(&"libx264".into()));
-        let dir =
-            std::env::temp_dir().join(format!("winshotx-ffmpeg-check-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let source = dir.join("source with spaces.mp4");
-        let destination = dir.join("output with spaces.mp4");
-        let generated = command(&options.ffmpeg_path)
-            .args([
-                "-y",
-                "-hide_banner",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc2=size=320x180:rate=120",
-                "-f",
-                "lavfi",
-                "-i",
-                "sine=frequency=440:sample_rate=48000",
-                "-t",
-                "0.4",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-            ])
-            .arg(&source)
-            .output()
-            .unwrap();
-        assert!(
-            generated.status.success(),
-            "{}",
-            String::from_utf8_lossy(&generated.stderr)
-        );
-        mp4_from_video(&source, &destination, 120, 320, 180, 85, &options).unwrap();
-        let probe = command(&options.ffmpeg_path)
-            .arg("-hide_banner")
-            .arg("-i")
-            .arg(&destination)
-            .output()
-            .unwrap();
-        let metadata = String::from_utf8_lossy(&probe.stderr);
-        assert!(metadata.contains("120 fps"), "{metadata}");
-        assert!(metadata.contains("Audio: aac"), "{metadata}");
-        assert!(std::fs::metadata(&destination).unwrap().len() > 1000);
-        // The application's FFmpeg path uses a native intermediate: check that the
-        // installed Media Foundation encoder accepts a 120 fps stream as well.
-        #[cfg(windows)]
-        {
-            let native = dir.join("native 120 fps.mp4");
-            let indices: Vec<usize> = (0..36).collect();
-            let delays: Vec<u32> = indices
-                .iter()
-                .map(|i| if i % 3 == 2 { 9 } else { 8 })
-                .collect();
-            let mut load = |index: usize| {
-                Ok(image::RgbaImage::from_pixel(
-                    320,
-                    180,
-                    image::Rgba([index as u8 * 4, 40, 160, 255]),
-                ))
-            };
-            crate::encode::mp4::encode(
-                &indices,
-                &delays,
-                &mut load,
-                &native,
-                &crate::encode::mp4::Mp4Options {
-                    width: 320,
-                    height: 180,
-                    fps: 120,
-                    quality: 85,
-                    bitrate_override: None,
-                },
-                None,
-                |_, _, _| {},
-            )
-            .unwrap();
-            assert!(std::fs::metadata(&native).unwrap().len() > 1000);
-            let _ = std::fs::remove_file(native);
-        }
-        println!(
-            "{}; custom executable path, CRF {}, AAC audio, 120 fps export verified",
-            report.version, options.crf
-        );
-        let _ = std::fs::remove_file(source);
-        let _ = std::fs::remove_file(destination);
-        let _ = std::fs::remove_dir(dir);
-    }
     fn args(options: &EncodingSettings) -> Vec<String> {
-        mp4_args(
-            Path::new("C:/input with spaces.mp4"),
-            Path::new("C:/output with spaces.mp4"),
-            30,
+        crate::record::stream_encoder::arguments(
+            options,
             1920,
             1080,
-            85,
-            options,
+            30,
+            Some(crate::record::stream_encoder::AudioFormat { channels: 2, sample_rate: 48000 }),
+            "tcp://127.0.0.1:1",
+            Some("tcp://127.0.0.1:2"),
+            std::path::Path::new("C:/output with spaces.mp4"),
         )
         .unwrap()
     }

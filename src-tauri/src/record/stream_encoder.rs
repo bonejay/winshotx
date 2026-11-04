@@ -925,8 +925,10 @@ mod tests {
         let video = ffmpeg::command(&options.ffmpeg_path).args(["-v", "error", "-i"]).arg(&path)
             .args(["-map", "0:v:0", "-pix_fmt", "gray", "-f", "rawvideo", "-"]).output().unwrap();
         assert!(video.status.success());
-        let marker = video.stdout.chunks_exact(320*180).position(|frame| frame[0] > 180).unwrap();
-        assert_eq!(marker, 24);
+        let marker = video.stdout.chunks_exact(320*180).position(|frame| frame[0] > 130).unwrap(); // midpoint of 30 and 230
+        // Decoding to constant frame rate can repeat the first frame once (AAC priming shifts
+        // the second frame's timestamp by ~21 ms), so the marker lands on frame 24 or 25.
+        assert!((24..=25).contains(&marker), "marker at frame {marker}");
         let audio = ffmpeg::command(&options.ffmpeg_path).args(["-v", "error", "-i"]).arg(&path)
             .args(["-map", "0:a:0", "-f", "s16le", "-"]).output().unwrap();
         assert!(audio.status.success());

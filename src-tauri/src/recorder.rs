@@ -17,7 +17,6 @@ pub const EVENT_TICK: &str = "winshotx://recording-tick";
 #[serde(rename_all = "camelCase")]
 pub struct RecordOptions {
     pub format: String,
-    pub fps: u32,
     pub audio: bool,
     #[serde(default)]
     pub microphone: bool,
@@ -86,7 +85,8 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
     crate::encode::ffmpeg::validate(&encoding)?;
     crate::audio_devices::stop(None);
     let region = region.to_even();
-    let fps = options.fps.clamp(5, 120);
+    // The active settings decide the frame rate (presets change it), not the caller.
+    let fps = settings.fps.clamp(5, 120);
     let origin = monitor_origin(app, region);
     let stop = Arc::new(AtomicBool::new(false));
     let pause = Arc::new(AtomicBool::new(false));
@@ -117,7 +117,7 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
         channels: a.formato.canales,
         sample_rate: a.formato.muestras_por_segundo,
     });
-    let paths = OutputPaths::reserve(std::path::Path::new(&settings.save_directory))?;
+    let paths = OutputPaths::reserve(std::path::Path::new(&settings.video_directory))?;
     let encoder = match Encoder::start(
         paths.clone(),
         &encoding,
@@ -140,9 +140,7 @@ pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<Se
         crop: (0, 0, 0, 0),
         stop: stop.clone(),
         pause: pause.clone(),
-        paused_ms: paused_ms.clone(),
         min_interval: Duration::ZERO,
-        start: started,
         reciclados: recycled.clone(),
     };
     let capture = match options.window.filter(|h| *h != 0) {
@@ -558,7 +556,6 @@ mod streaming_tests {
         };
         tx.send(CapturedFrame {
             bgra: vec![80; 320 * 180 * 4],
-            ts_ms: 0,
         })
         .unwrap();
         let writer = std::thread::spawn(move || {
@@ -615,12 +612,14 @@ mod streaming_tests {
             std::env::temp_dir().join(format!("winshotx-audio-clock-{}", uuid::Uuid::new_v4()));
         let paths = OutputPaths::reserve(&dir).unwrap();
         let pause = Arc::new(AtomicBool::new(false));
-        let audio = crate::record::audio::empezar(
+        let audio = crate::record::audio::empezar_con_dispositivos(
             crate::record::audio::Fuentes {
                 sistema: true,
                 microfono: false,
             },
             pause.clone(),
+            None,
+            None,
         )
         .unwrap();
         let started = audio.started;
@@ -634,7 +633,6 @@ mod streaming_tests {
         let (tx, rx) = std::sync::mpsc::sync_channel(2);
         tx.send(CapturedFrame {
             bgra: vec![80; 1280 * 720 * 4],
-            ts_ms: 0,
         })
         .unwrap();
         let stop = Arc::new(AtomicBool::new(false));

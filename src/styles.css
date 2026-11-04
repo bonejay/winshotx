@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* Paleta y radios del sistema visual: superficies oscuras translucidas,
-   acento azul macOS y sombras suaves de ventana flotante. */
+/* Visual system palette and radii: translucent dark surfaces, blue accent, soft
+   floating-window shadows. */
 @theme {
   --color-surface: oklch(0.21 0.006 285.9);
   --color-surface-strong: oklch(0.17 0.006 285.9);
@@ -11,12 +11,8 @@
   --shadow-window: 0 24px 60px -12px rgb(0 0 0 / 0.65), 0 0 0 0.5px rgb(255 255 255 / 0.08);
   --shadow-float: 0 12px 32px -8px rgb(0 0 0 / 0.55), 0 0 0 0.5px rgb(255 255 255 / 0.1);
 
-  /* Los colores por su OFICIO, no por su tono: `bg-tarjeta` sigue queriendo decir lo
-     mismo en claro y en oscuro, y `bg-neutral-800` no. Es lo unico que permite cambiar
-     de tema sin repasar la interfaz entera cada vez.
-
-     Estos son los valores del tema oscuro, que es el de siempre, y valen exactamente lo
-     que valia la clase que sustituyen: cambiar de nombre no puede cambiar ni un pixel. */
+  /* Colors are named by role, not by shade, so the same class works in both themes.
+     These are the dark theme values. */
   --color-marca: #0a9bff;
   --color-lienzo: #161618;
   --color-tarjeta: --alpha(var(--color-white) / 3%);
@@ -28,11 +24,10 @@
   --color-linea-viva: --alpha(var(--color-white) / 25%);
   --color-realce: --alpha(var(--color-white) / 10%);
   --color-activo: --alpha(var(--color-white) / 15%);
-  /* La pastilla del selector y el boton encendido: sobre fondo oscuro se hacen aclarando,
-     y sobre fondo claro no hay forma de aclarar mas, asi que ahi se hacen con blanco puro
-     y una sombra. Por eso no puede ser el mismo token que `activo`. */
+  /* Selected pill and active button: lightened on dark backgrounds, white with a shadow
+     on light ones, so this is a separate token from `activo`. */
   --color-pastilla: --alpha(var(--color-white) / 15%);
-  /* Y la pista de un interruptor apagado, que tiene que verse sin gritar. */
+  /* Track of a switch that is off: visible but quiet. */
   --color-apagador: --alpha(var(--color-white) / 15%);
   --color-titulo: var(--color-neutral-100);
   --color-texto: var(--color-neutral-200);
@@ -48,9 +43,8 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* El tema claro no es el oscuro con los grises al reves: sobre un fondo claro los
-     trazos se hacen con negro transparente, porque el blanco transparente ahi no pinta
-     nada, y el texto no baja tanto de contraste como sube en el oscuro. */
+  /* The light theme is not just inverted greys: strokes use translucent black, and text
+     contrast is tuned separately. */
   :root[data-tema="claro"] {
     color-scheme: light;
 
@@ -89,7 +83,7 @@
     color: var(--color-titulo);
   }
 
-  /* Nada de menu contextual del webview: esto tiene que sentirse nativo. */
+  /* No webview text selection or context feel: the UI should feel native. */
   * {
     -webkit-user-select: none;
     user-select: none;
@@ -130,74 +124,69 @@
 }
 
 /* Settings use the same system typography and controls as the capture tools. */
-.settings-shell { display:flex; height:100%; background:var(--color-lienzo); color:var(--color-texto); font:16px/1.5 "Segoe UI Variable Text","Segoe UI",sans-serif; }
-.settings-sidebar { width:225px; flex-shrink:0; padding:24px 12px; border-right:1px solid var(--color-linea); display:flex; flex-direction:column; background:var(--color-flotante); }
-.settings-brand { display:flex; gap:10px; align-items:center; padding:0 12px 28px; font-size:19px; font-weight:600; }
+.settings-shell { display:flex; height:100%; background:var(--color-lienzo); color:var(--color-texto); font:14px/1.4 "Segoe UI Variable Text","Segoe UI",sans-serif; }
+.settings-sidebar { width:190px; flex-shrink:0; padding:16px 10px; border-right:1px solid var(--color-linea); display:flex; flex-direction:column; background:var(--color-flotante); }
+.settings-brand { display:flex; gap:8px; align-items:center; padding:0 10px 18px; font-size:16px; font-weight:600; }
 .settings-brand svg { color:var(--color-suave); }
-.settings-sidebar nav { display:flex; flex-direction:column; gap:4px; }
-.settings-sidebar nav button { display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:5px; color:var(--color-suave); text-align:left; font-size:14px; }
+.settings-sidebar nav { display:flex; flex-direction:column; gap:2px; }
+.settings-sidebar nav button { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:5px; color:var(--color-suave); text-align:left; font-size:14px; }
 .settings-sidebar nav button:hover { background:var(--color-realce); }
 .settings-sidebar nav button[aria-current] { color:var(--color-titulo); background:var(--color-realce); box-shadow:inset 3px 0 var(--color-marca); }
-.settings-sidebar-bottom { margin-top:auto; padding:18px 12px 0; color:var(--color-apagado); font-size:14px; }
-.settings-main { flex:1; min-width:0; padding:26px 28px; overflow:auto; }
-.settings-page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-.settings-page-header h1 { font-size:26px; line-height:1.3; font-weight:600; margin:0 0 8px; color:var(--color-titulo); }
-.settings-page-header p, .settings-card header p { color:var(--color-apagado); font-size:14px; line-height:1.5; }
-.settings-save { display:flex; align-items:center; gap:6px; color:#75bb94; font-size:14px; }
-.settings-card { border:1px solid var(--color-linea); border-radius:6px; background:var(--color-tarjeta); margin-bottom:20px; overflow:hidden; }
-.settings-card header { padding:16px 20px; border-bottom:1px solid var(--color-linea); }
-.settings-card h2 { font-size:17px; font-weight:600; margin-bottom:5px; }
-.settings-field { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:16px 20px; min-height:60px; border-bottom:1px solid var(--color-linea-tenue); }
+.settings-sidebar-bottom { margin-top:auto; padding:12px 10px 0; color:var(--color-apagado); font-size:12px; }
+.settings-main { flex:1; min-width:0; padding:18px 22px; overflow:auto; }
+.settings-page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.settings-page-header h1 { font-size:20px; line-height:1.25; font-weight:600; margin:0 0 3px; color:var(--color-titulo); }
+.settings-page-header p, .settings-card header p { color:var(--color-apagado); font-size:12.5px; line-height:1.4; }
+.settings-save { display:flex; align-items:center; gap:6px; color:#75bb94; font-size:13px; }
+.settings-card { border:1px solid var(--color-linea); border-radius:6px; background:var(--color-tarjeta); margin-bottom:12px; overflow:hidden; }
+.settings-card header { padding:9px 14px; border-bottom:1px solid var(--color-linea); }
+.settings-card h2 { font-size:14px; font-weight:600; margin-bottom:1px; }
+.settings-field { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:6px 14px; min-height:38px; border-bottom:1px solid var(--color-linea-tenue); }
 .settings-field:last-child { border-bottom:0; }
 .settings-field>div:first-child { flex:1; min-width:0; }
-.settings-field small { display:block; color:var(--color-apagado); font-size:14px; margin-top:5px; line-height:1.5; overflow-wrap:anywhere; }
-.settings-control { display:flex; align-items:center; gap:10px; max-width:58%; }
-.settings-control select,.settings-control input:not([type=range]),.settings-control button:not([role=switch]) { background:var(--color-hueco); border:1px solid var(--color-linea-fuerte); border-radius:5px; padding:8px 10px; color:var(--color-texto); max-width:100%; font-size:14px; }
+.settings-field > div:first-child > span { font-size:13.5px; }
+.settings-field small { display:block; color:var(--color-apagado); font-size:12px; margin-top:1px; line-height:1.35; overflow-wrap:anywhere; }
+.settings-control { display:flex; align-items:center; gap:8px; max-width:60%; }
+.settings-control select,.settings-control input:not([type=range]),.settings-control button:not([role=switch]) { background:var(--color-hueco); border:1px solid var(--color-linea-fuerte); border-radius:4px; padding:4px 8px; color:var(--color-texto); max-width:100%; font-size:13px; }
 .settings-control button:not([role=switch]) { display:flex; align-items:center; gap:6px; }
-.settings-control input[type=number] { width:85px; }
-.settings-control input[type=range] { width:125px; accent-color:var(--color-marca); }
-.settings-control input:not([type=range]):not([type=number]) { width:145px; }
-.settings-control select { max-width:330px; }
-.settings-primary { display:inline-flex; align-items:center; gap:8px; background:var(--color-marca); color:white; border-radius:5px; padding:10px 16px; font-weight:600; font-size:14px; }
-.settings-error { padding:12px 18px; color:#ef9a9a; background:#d6333314; border-radius:5px; line-height:1.5; }
-.settings-note { padding:12px 20px; color:var(--color-apagado); font-size:14px; line-height:1.5; }
-.settings-advanced { padding:16px 20px; border-top:1px solid var(--color-linea); }
-.settings-advanced summary { color:var(--color-suave); cursor:pointer; font-size:14px; }
-.settings-advanced p { font-size:14px; line-height:1.5; color:var(--color-apagado); margin:12px 0; }
-.settings-advanced textarea { width:100%; min-height:100px; border:1px solid var(--color-linea-fuerte); border-radius:5px; background:var(--color-hueco); color:var(--color-texto); padding:12px; font-family:Consolas,monospace; font-size:14px; user-select:text; }
-.settings-shell :focus-visible { outline:2px solid var(--color-marca); outline-offset:2px; }
-
-.settings-control input.ffmpeg-path:not([type=range]):not([type=number]) { width:420px; }
-.settings-secondary { padding:8px 12px; border:1px solid var(--color-linea-fuerte); border-radius:5px; background:var(--color-hueco); color:var(--color-texto); font-size:15px; }
+.settings-control input[type=number] { width:75px; }
+.settings-control input[type=range] { width:120px; accent-color:var(--color-marca); }
+.settings-control input:not([type=range]):not([type=number]) { width:140px; }
+.settings-control select { max-width:300px; }
+.settings-control input.ffmpeg-path:not([type=range]):not([type=number]) { width:380px; }
+.settings-primary { display:inline-flex; align-items:center; gap:7px; background:var(--color-marca); color:white; border-radius:5px; padding:6px 12px; font-weight:600; font-size:13px; }
+.settings-secondary { padding:4px 10px; border:1px solid var(--color-linea-fuerte); border-radius:4px; background:var(--color-hueco); color:var(--color-texto); font-size:13px; }
 .settings-secondary:hover { background:var(--color-realce); }
-.settings-secondary:disabled { opacity:.45; }
-.audio-source + .audio-source { border-top:1px solid var(--color-linea); }
-.audio-meter-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 18px; padding:12px 20px 18px; font-size:15px; }
-.audio-meter { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:10px; }
-.audio-meter-track { width:150px; height:9px; overflow:hidden; border-radius:2px; background:var(--color-hueco); border:1px solid var(--color-linea); }
-.audio-meter-track span { display:block; height:100%; transition:width 80ms linear; }
-.audio-meter output { min-width:90px; text-align:right; font-size:15px; font-variant-numeric:tabular-nums; }
-.audio-meter-caption { color:var(--color-apagado); font-size:15px; }
-.audio-device-error { color:#ef9a9a; font-size:15px; max-width:100%; overflow-wrap:anywhere; }
-.audio-check-actions { display:flex; flex-wrap:wrap; gap:10px; padding:14px 20px 0; }
-
-.settings-shell { font-size:16px; }
-.settings-sidebar nav button { font-size:16px; }
-.settings-field > div:first-child > span { font-size:16px; }
-.settings-control select,.settings-control input:not([type=range]),.settings-control button:not([role=switch]) { font-size:15px; }
-.settings-field small,.settings-page-header p,.settings-card header p,.settings-note,.settings-advanced p,.audio-meter-caption { font-size:14px; }
-.settings-primary,.settings-secondary,.audio-meter-row { font-size:15px; }
+.settings-secondary:disabled { opacity:.55; cursor:wait; }
+.settings-error { padding:7px 14px; color:#ef9a9a; background:#d6333314; border-radius:5px; font-size:12.5px; line-height:1.4; }
+.settings-note { padding:6px 14px; color:var(--color-apagado); font-size:12.5px; line-height:1.4; }
+.settings-advanced { padding:8px 14px; border-top:1px solid var(--color-linea); }
+.settings-advanced summary { color:var(--color-suave); cursor:pointer; font-size:13px; }
+.settings-advanced p { font-size:12.5px; line-height:1.4; color:var(--color-apagado); margin:6px 0; }
+.settings-advanced textarea { width:100%; min-height:70px; border:1px solid var(--color-linea-fuerte); border-radius:4px; background:var(--color-hueco); color:var(--color-texto); padding:8px; font-family:Consolas,monospace; font-size:12.5px; user-select:text; }
+.settings-shell :focus-visible { outline:2px solid var(--color-marca); outline-offset:2px; }
 .settings-control select { color-scheme:dark; }
 .settings-control select option { background-color:#242428; color:#f5f5f5; }
 .settings-control select option:disabled { color:#a8a8b0; }
 :root[data-tema="claro"] .settings-control select { color-scheme:light; }
 :root[data-tema="claro"] .settings-control select option { background-color:#fff; color:#202024; }
 :root[data-tema="claro"] .settings-control select option:disabled { color:#73737b; }
-.encoder-check { padding:16px 20px; border-top:1px solid var(--color-linea); }
-.encoder-check p { margin-top:9px; font-size:14px; line-height:1.5; }
+.audio-source + .audio-source { border-top:1px solid var(--color-linea); }
+.audio-meter-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 14px; padding:6px 14px 10px; font-size:13px; }
+.audio-meter { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.audio-meter-track { width:140px; height:7px; overflow:hidden; border-radius:2px; background:var(--color-hueco); border:1px solid var(--color-linea); }
+.audio-meter-track span { display:block; height:100%; transition:width 80ms linear; }
+.audio-meter output { min-width:80px; text-align:right; font-size:13px; font-variant-numeric:tabular-nums; }
+.audio-meter-caption { color:var(--color-apagado); font-size:12.5px; }
+.audio-device-error { color:#ef9a9a; font-size:12.5px; max-width:100%; overflow-wrap:anywhere; }
+.audio-check-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 14px 0; }
+.encoder-check { padding:8px 14px; border-top:1px solid var(--color-linea); }
+.encoder-check p { margin-top:5px; font-size:12.5px; line-height:1.4; }
 .encoder-check .success { color:#75bb94; }
-
 .encoder-check .audio-check-actions { padding:0; }
-.encoder-check .audio-check-actions > span { font-size:14px; color:var(--color-apagado); line-height:1.5; }
+.encoder-check .audio-check-actions > span { font-size:12.5px; color:var(--color-apagado); line-height:1.4; }
 .encoder-check .settings-note { padding:0; }
-.settings-secondary:disabled { opacity:.55; cursor:wait; }
+.settings-command { padding:8px 14px 10px; border-top:1px solid var(--color-linea); }
+.settings-command > div { display:flex; align-items:center; justify-content:space-between; font-size:13px; color:var(--color-suave); }
+.settings-command pre { margin:6px 0; padding:8px; border:1px solid var(--color-linea-fuerte); border-radius:4px; background:var(--color-hueco); color:var(--color-texto); font-family:Consolas,monospace; font-size:11.5px; line-height:1.45; white-space:pre-wrap; word-break:break-all; user-select:text; }
+.settings-command p { font-size:12px; line-height:1.4; color:var(--color-apagado); }

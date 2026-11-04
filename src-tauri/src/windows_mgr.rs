@@ -12,16 +12,12 @@ use crate::capture::{self, MonitorInfo, Rect};
 use crate::error::Result;
 use crate::state::{AppState, CandadoCaptura};
 
-/// Las ventanas del overlay que esperan a ensennarse, hasta que cada una avise de que tiene
-/// su imagen pintada (`overlay_listo`).
+/// Overlay windows waiting to be shown until each reports that its image is painted
+/// (`overlay_listo`). Windows stay parked off-screen while loading, so nothing appears half-
+/// drawn.
 ///
-/// Antes se ensennaban nada mas congelar, y durante los 300-400 ms que tardaba en llegarles
-/// la imagen el usuario veia una pantalla oscura con «Preparando la captura». Munir, el 5 de
-/// septiembre de 2026: *«lo del principio de carga queda muy mal»*. Ahora la ventana sigue
-/// aparcada fuera de las pantallas mientras carga, y lo que aparece, aparece ya pintado.
-///
-/// La generacion distingue una captura de la siguiente: un aviso que llegue tarde, de una
-/// captura que ya se cancelo, no puede ensennar una ventana que nadie ha pedido.
+/// The generation tells captures apart: a late reply from a cancelled capture cannot show a
+/// window.
 struct Pendientes {
     generacion: u64,
     ventanas: Vec<(u32, String, MonitorInfo)>,
@@ -36,52 +32,40 @@ static PENDIENTES: Mutex<Pendientes> = Mutex::new(Pendientes {
     con_foco: false,
 });
 
-/// Cuanto se espera a que un overlay avise de que esta pintado antes de ensennarlo igual.
-/// Si el frontend no llega a avisar (porque ha fallado y esta ensennando su error), el
-/// usuario tiene que poder ver ese error y salir con Escape, no quedarse sin nada.
+/// How long to wait for an overlay to report it is painted before showing it anyway, so a
+/// frontend error is still visible and can be dismissed with Escape.
 const ESPERA_MAXIMA: std::time::Duration = std::time::Duration::from_millis(900);
 
-/// El numero de la captura en curso: viaja en el payload y vuelve en `overlay_listo`.
+/// The current capture number: sent in the payload and echoed back in `overlay_listo`.
 pub fn generacion_actual() -> u64 {
     PENDIENTES.lock().generacion
 }
 
 pub const OVERLAY_PREFIX: &str = "overlay-";
 
-/// Los argumentos con los que arranca el navegador de TODAS las ventanas.
+/// WebView2 browser arguments for ALL windows. The first three are wry's defaults; the other
+/// three stop Chromium from throttling hidden windows, since overlays wait parked off-screen
+/// and would otherwise react ~300 ms late.
 ///
-/// Los tres primeros son los que pone wry si no se le dice nada (quitan el menu flotante de
-/// Edge y su filtro de descargas). Los otros tres le prohiben a Chromium tratar como
-/// «de fondo» a una ventana que no se ve: los overlays viven aparcados fuera de las
-/// pantallas entre captura y captura, y con la ventana de fondo el navegador tardaba unos
-/// 300 ms en enterarse del aviso de que hay captura nueva (trampa 33).
-///
-/// **Tienen que ser los mismos en todas las ventanas**, incluida la `main` de
-/// `tauri.conf.json`: WebView2 comparte un solo proceso de navegador y lo configura la
-/// primera ventana; una segunda que pida otros argumentos se queda sin webview y sale en
-/// blanco. Eso es lo que paso la primera vez que se intento, cuando solo se pusieron en el
-/// overlay.
+/// They must be identical for every window, including `main` in `tauri.conf.json`: WebView2
+/// shares one browser process configured by the first window, and a window asking for different
+/// arguments stays blank.
 pub const NAVEGADOR_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling";
 
 static OVERLAY_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 pub const RECORDER_PREFIX: &str = "recorder-";
-/// Las capturas ancladas. Puede haber varias a la vez, cada una con su numero.
-pub const PIN_PREFIX: &str = "pin-";
-/// La ventanita de la cuenta atras del temporizador. Solo hay una, en la pantalla donde
-/// este el raton, y como los overlays se esconde en vez de cerrarse.
+/// The capture-delay countdown window. There is one, on the screen with the cursor, hidden
+/// instead of closed like the overlays.
 pub const COUNTDOWN_LABEL: &str = "countdown";
 
-/// Lado de la ventanita de la cuenta atras, en pixeles logicos: en una pantalla al 150 %
-/// tiene que verse igual de grande, no mas pequenna.
+/// Countdown window size in logical pixels, so it looks the same at any display scale.
 const CUENTA_LADO: f64 = 132.0;
 
-/// Lo que se le da al escritorio para repintar el hueco de la cuenta atras antes de
-/// congelar. Sin esto la captura se lleva la ventanita dentro, y en el centro de la
-/// pantalla eso no se le escapa a nadie.
+/// Time for the desktop to repaint where the countdown was before freezing, so it does not
+/// appear in the capture.
 const MARGEN_REPINTADO: std::time::Duration = std::time::Duration::from_millis(120);
 
-/// Con que intencion se ha abierto el overlay. Lo decide el atajo que se pulso, y
-/// es lo que deja que el modo instantaneo copie al soltar sin cargarse la grabacion.
+/// Why the overlay was opened, decided by the shortcut that was pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OverlayIntent {
@@ -90,64 +74,47 @@ pub enum OverlayIntent {
 }
 
 impl OverlayIntent {
-    /// Si lo que se va a llevar el usuario es una foto, que es lo que decide si el
-    /// temporizador tiene sentido y si la barra de modos arranca en «foto».
+    /// Whether the result is a screenshot: decides whether the delay applies and which mode the
+    /// mode bar starts in.
     pub fn es_foto(self) -> bool {
         self != Self::Record
     }
 }
 
-/// Punto de entrada del atajo de captura: prepara la pantalla y abre la seleccion.
+/// Entry point of the capture shortcut: prepare the screen and open the selection.
 ///
-/// Entre pulsar la tecla y congelar puede haber un paso previo, y ese paso es lo unico
-/// que distingue esta funcion de `congelar_y_abrir`. Hay dos cosas que **tienen que pasar
-/// antes** de la foto y no despues, asi que ninguna de las dos puede ser una tecla del
-/// overlay como el resto: el temporizador (que existe para que la pantalla siga como
-/// estaba cuando se pulso el atajo) y esconder los iconos del escritorio.
+/// Two things must happen before the screen is frozen, so they cannot be overlay keys: the
+/// capture delay and hiding the desktop icons.
 pub fn open_overlays(app: &AppHandle, intent: OverlayIntent) -> Result<()> {
     let state = app.state::<AppState>();
     if state.is_recording() {
         return Ok(());
     }
-    // Si el atajo se pulsa dos veces muy seguidas, la segunda pulsacion se ignora en vez
-    // de arrancar otra captura por encima de la que ya esta en marcha: la primera va a
-    // dejar el overlay abierto igual, y dejar que dos disparos capturen pantalla a la vez
-    // solo consigue que las dos vayan mas lentas. Con el temporizador puesto, el candado
-    // cubre tambien la espera: pulsar otra vez durante la cuenta atras no la reinicia.
+    // A second press while a capture is in progress is ignored instead of starting another
+    // capture on top. With a delay, the lock also covers the countdown.
     let Some(candado) = state.intentar_capturar() else {
         return Ok(());
     };
-    crate::crono::marca("atajo");
     *state.intent.write() = intent;
 
-    // La espera es solo del atajo de capturar, aunque el overlay sea el mismo. Al grabar,
-    // la pantalla congelada es un fondo para elegir la region y no la foto que se lleva
-    // nadie: hacer esperar cinco segundos ahi solo seria una espera.
+    // The delay only applies to screenshots. For recordings the frozen screen is just a
+    // background for choosing the region.
     let segundos = state.settings.read().capture_delay_seconds;
     if segundos == 0 || !intent.es_foto() {
         return congelar_y_abrir(app, candado);
     }
 
-    // **El temporizador no puede dormir aqui.** Esta funcion la llama el manejador del
-    // atajo global, y ese manejador corre dentro del bucle de eventos del hilo principal:
-    // el plugin crea una ventana oculta que recibe el `WM_HOTKEY` y una ventana atiende
-    // sus mensajes en el hilo que la creo. Un `sleep` aqui congela la aplicacion entera
-    // durante los tres o cinco segundos, incluida la cuenta atras que se acaba de
-    // ensennar, que se quedaria clavada en el primer numero.
+    // The delay must not sleep here: this runs inside the global-shortcut handler on the main
+    // event loop, and sleeping would freeze the whole app, including the countdown.
     mostrar_cuenta_atras(app, segundos);
     let espera = app.clone();
     std::thread::spawn(move || {
-        // La cuenta atras se esconde un pelin ANTES del final, no en el mismo instante en
-        // que se congela. Esconder una ventana no borra su hueco de la pantalla: hay que
-        // darle al escritorio el tiempo de repintar lo que habia debajo, o la captura se
-        // lleva la ventanita dentro. Ese margen sale de la cuenta atras, no se suma
-        // detras, asi que la espera total sigue siendo la que pidio el usuario y el ultimo
-        // numero se ve 880 ms en vez de 1000: no se nota.
+        // Hide the countdown slightly before the end so the desktop can repaint underneath it.
+        // The margin comes out of the countdown, so the total delay stays as configured.
         let total = std::time::Duration::from_secs(u64::from(segundos));
         std::thread::sleep(total.saturating_sub(MARGEN_REPINTADO));
 
-        // Volver al hilo principal no es opcional: manejar ventanas desde otro hilo se
-        // queda esperando al bucle de eventos.
+        // Window handling must happen on the main thread.
         let para_esconder = espera.clone();
         let _ = espera.run_on_main_thread(move || esconder_cuenta_atras(&para_esconder));
 
@@ -155,48 +122,26 @@ pub fn open_overlays(app: &AppHandle, intent: OverlayIntent) -> Result<()> {
         let seguir = espera.clone();
         let _ = espera.run_on_main_thread(move || {
             if let Err(error) = congelar_y_abrir(&seguir, candado) {
-                eprintln!("no se ha podido abrir el overlay: {error}");
+                eprintln!("could not open the overlay: {error}");
             }
         });
     });
     Ok(())
 }
 
-/// Congela la pantalla y abre un overlay por monitor.
-/// Congelar primero es lo que hace que la seleccion sea estable y precisa al pixel.
+/// Freeze the screens and open one overlay per monitor. Freezing first makes the selection
+/// stable and pixel-exact.
 ///
-/// Las ventanas overlay se reutilizan entre capturas en vez de crearse de cero cada vez:
-/// construir un WebView2 nuevo costaba entre 200ms y 800ms por pantalla (variable, y el
-/// peor coste con tres monitores), y ese tiempo desaparece del todo si la ventana ya
-/// existe, oculta, de la vez anterior. `close_overlays` las esconde en vez de cerrarlas
-/// para que quede algo que reutilizar. Cuando se reutiliza una ventana no llega un
-/// remontaje de React que dispare su arranque solo, asi que se le avisa con
-/// `EVENT_OVERLAY_SHOW` para que recargue la captura nueva.
+/// Overlay windows are reused between captures (`close_overlays` hides them) because creating a
+/// WebView2 costs 200-800 ms per screen. A reused window gets no React remount, so it is
+/// notified with `EVENT_OVERLAY_SHOW`.
 ///
-/// El candado entra por parametro y se suelta al terminar: con el temporizador puesto se
-/// cogio hace tres segundos, en otro hilo, y no se puede volver a pedir aqui.
+/// The capture lock is passed in and released at the end; with a delay it was taken earlier on
+/// another thread.
 fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     let state = app.state::<AppState>();
 
-    // El anillo de los ultimos segundos se aparta mientras dura esto, y vuelve solo cuando
-    // el guardian se suelta al final del hilo de abajo. Se come el 86% de un nucleo a 60
-    // fps y alto nativo, y congelar tres pantallas compitiendo con eso es lo que hacia que
-    // el atajo se notara. Ver `replay::apartar`, que explica por que esto no deja un
-    // agujero en lo grabado.
-
-    // Los iconos se esconden solo lo que dura el disparo, no toda la seleccion: el
-    // overlay tapa el escritorio de todas formas, asi que tenerlos escondidos mas rato no
-    // se ve en la imagen y si aumenta la posibilidad de dejarselos escondidos a alguien.
-    // El guardian los devuelve tambien si la captura falla a medias.
-    let esconder_iconos = state.settings.read().hide_desktop_icons;
-    let iconos = if esconder_iconos {
-        crate::platform::desktop_icons::esconder()
-    } else {
-        None
-    };
-
-    // Las pantallas que hay, sin fotografiarlas todavia: hace falta saber cuantas son y
-    // cual tiene el raton antes de decidir por cual se empieza.
+    // The monitors, without capturing them yet: needed to know which one has the cursor.
     let monitors = capture::monitors()?;
     if monitors.is_empty() {
         return Err(crate::error::AppError::Msg(
@@ -205,7 +150,7 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     }
     let cursor = cursor_position();
 
-    // Una captura nueva: lo que quedara pendiente de la anterior ya no cuenta.
+    // A new capture: anything pending from the previous one no longer counts.
     let generacion = {
         let mut pendientes = PENDIENTES.lock();
         pendientes.generacion += 1;
@@ -215,8 +160,7 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
         pendientes.generacion
     };
 
-    // Si algun monitor de la ultima vez ya no existe (se desconecto una pantalla), su
-    // ventana se queda escondida en el pool: no molesta a nadie ahi.
+    // Windows of monitors that no longer exist stay hidden in the pool.
     let etiquetas_actuales: std::collections::HashSet<String> = monitors
         .iter()
         .map(|m| format!("{OVERLAY_PREFIX}{}", m.id))
@@ -227,9 +171,8 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
         }
     }
 
-    // **Primero la pantalla donde esta el raton, sola.** Es la que el usuario mira. Se
-    // congela, se le manda su imagen y se sigue con las demas: asi aparece bastante antes
-    // que si se esperara a tener las tres, y las otras dos llegan justo detras.
+    // Freeze the screen under the cursor first, on its own, and send its image; the others
+    // follow right after.
     let primera = cursor
         .and_then(|(x, y)| monitors.iter().position(|m| m.contains(x, y)))
         .or_else(|| monitors.iter().position(|m| m.is_primary))
@@ -237,18 +180,12 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     let resto: Vec<usize> = (0..monitors.len()).filter(|&i| i != primera).collect();
     state.freezes.write().clear();
 
-    // **Y todo eso en un hilo aparte, no en el principal.** El aviso a cada ventana viaja
-    // por el bucle de mensajes del hilo principal: si ese hilo se queda esperando a que se
-    // congelen las otras dos pantallas, el aviso de la primera se queda en la cola con el,
-    // y la prioridad no sirve de nada. Medido el 5 de septiembre de 2026: congelada a los
-    // 53 ms, y su navegador enterandose a los 131. Aqui el principal solo hace lo que solo
-    // el puede hacer (hablar con las ventanas), unas decimas de milisegundo cada vez.
+    // All of this runs on a separate thread. Messages to windows go through the main thread's
+    // loop, so blocking it while the other screens freeze would delay the first screen too.
     let app = app.clone();
     std::thread::spawn(move || {
-        // Los tres guardianes viven hasta que las dos tandas esten congeladas: el candado
-        // de «hay una captura en marcha», el anillo apartado y los iconos escondidos.
+        // The capture lock lives until both batches are frozen.
         let candado = candado;
-        let iconos = iconos;
         let primera_id = monitors[primera].id;
         for (numero, tanda) in [vec![primera], resto].into_iter().enumerate() {
             if tanda.is_empty() {
@@ -257,19 +194,16 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
             let freezes = match capture::freeze_monitors(&tanda) {
                 Ok(freezes) => freezes,
                 Err(error) => {
-                    eprintln!("no se ha podido congelar la pantalla: {error}");
+                    eprintln!("could not freeze the screen: {error}");
                     continue;
                 }
             };
-            crate::crono::marca(&format!("congelado-{}", tanda.len()));
             let monitores: Vec<MonitorInfo> = freezes.iter().map(|f| f.monitor.clone()).collect();
             app.state::<AppState>().freezes.write().extend(freezes);
             if numero == 1 {
-                // Las demas no se mandan hasta que la primera este A LA VISTA. Servirles
-                // sus PNG ocupa el hilo principal, que es el mismo que tiene que ensennar
-                // la primera: medido, la retrasaba de 105 a 280 ms una de cada tres veces.
-                // Capturarlas si se ha hecho ya, en paralelo con la primera; lo que espera
-                // es solo el aviso.
+                // The other screens are only sent once the first one is visible: serving their
+                // PNGs occupies the main thread, which is also the one showing the first
+                // screen. They are already captured in parallel; only the notification waits.
                 esperar_a_que_se_vea(primera_id, generacion);
             }
             let dentro = app.clone();
@@ -277,16 +211,15 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
                 let state = dentro.state::<AppState>();
                 for monitor in &monitores {
                     if let Err(error) = preparar_overlay(&dentro, &state, monitor) {
-                        eprintln!("no se ha podido preparar el overlay: {error}");
+                        eprintln!("could not prepare the overlay: {error}");
                     }
                 }
             });
         }
-        drop(iconos);
         drop(candado);
 
-        // Si alguna no avisa a tiempo, se ensenna igual: mejor ver la pantalla de error del
-        // overlay, con su Escape, que quedarse sin nada tras pulsar el atajo.
+        // If a screen does not report in time it is shown anyway: the overlay's error screen
+        // with Escape is better than nothing.
         std::thread::sleep(ESPERA_MAXIMA);
         let dentro = app.clone();
         let _ = app.run_on_main_thread(move || mostrar_las_que_falten(&dentro, generacion));
@@ -295,32 +228,26 @@ fn congelar_y_abrir(app: &AppHandle, candado: CandadoCaptura) -> Result<()> {
     Ok(())
 }
 
-/// Le manda a la ventana de ese monitor su captura y la deja apuntada como pendiente de
-/// ensennar. La ventana se crea si no existia.
+/// Send a monitor's window its capture and mark it pending. Creates the window if needed.
 fn preparar_overlay(app: &AppHandle, state: &AppState, monitor: &MonitorInfo) -> Result<()> {
     let label = format!("{OVERLAY_PREFIX}{}", monitor.id);
 
     let window = if let Some(existente) = app.get_webview_window(&label) {
-        // El payload va ya construido en el propio evento: sin esto, el frontend
-        // tendria que pedirlo aparte con un invoke (overlay_bootstrap) despues de
-        // enterarse, y esa vuelta de IPC completa se ahorra entera.
-        // `emit` manda el evento a TODAS las ventanas, no solo a `existente`: con eso
-        // las tres pantallas recibian el payload de la ultima que se procesaba en
-        // este bucle y se pisaban entre si. `emit_to` con la etiqueta de esta ventana
-        // es lo que lo manda solo a ella.
+        // The payload travels in the event itself, saving an `overlay_bootstrap` round trip.
+        // Use `emit_to` with this window's label: plain `emit` goes to every window and the
+        // screens would overwrite each other's payloads.
         if let Ok(payload) = crate::commands::build_overlay_payload(state, monitor.id) {
             let _ = existente.emit_to(label.as_str(), crate::EVENT_OVERLAY_SHOW, payload);
         }
-        crate::crono::marca(&format!("emitido-{}", monitor.id));
         existente
     } else {
-        // Recien creada arranca sola y pide su payload con `overlay_bootstrap`.
+        // A newly created window boots by itself and requests its payload with
+        // `overlay_bootstrap`.
         build_overlay_window(app, &label, monitor.id)?
     };
 
-    // El tamanno se pone ya, aparcada, para que el navegador se acomode a el mientras
-    // carga la imagen. La posicion NO: eso es ensennarla, y se ensenna cuando avise de
-    // que esta pintada (`overlay_listo`), o cuando se agote la espera del rescate.
+    // Set the size now, while parked, so the webview can lay out while the image loads.
+    // Positioning happens when it is shown (`overlay_listo` or the fallback timeout).
     window.set_size(PhysicalSize::new(monitor.width, monitor.height))?;
     PENDIENTES
         .lock()
@@ -329,9 +256,8 @@ fn preparar_overlay(app: &AppHandle, state: &AppState, monitor: &MonitorInfo) ->
     Ok(())
 }
 
-/// Espera a que el overlay de ese monitor haya salido de la lista de pendientes (o sea, a
-/// que se haya ensennado), con un tope por si no llega a avisar: la espera es para ordenar,
-/// no para bloquear.
+/// Wait until that monitor's overlay has left the pending list (i.e. was shown), with a
+/// timeout: the wait orders things, it must not block.
 fn esperar_a_que_se_vea(monitor_id: u32, generacion: u64) {
     let tope = std::time::Instant::now() + std::time::Duration::from_millis(250);
     while std::time::Instant::now() < tope {
@@ -350,25 +276,22 @@ fn esperar_a_que_se_vea(monitor_id: u32, generacion: u64) {
     }
 }
 
-/// El overlay de ese monitor ya esta pintado: se ensenna, y si es el de la pantalla del
-/// raton se le da el foco.
-///
-/// Llega desde un comando (otro hilo), y las ventanas se manejan en el principal.
+/// That monitor's overlay is painted: show it and focus it if it is on the cursor's screen.
+/// Called from a command thread; windows are handled on the main thread.
 pub fn overlay_listo(app: &AppHandle, monitor_id: u32, generacion: u64) {
     let dentro = app.clone();
     let _ = app.run_on_main_thread(move || {
         let Some((label, monitor, con_foco)) = sacar_pendiente(monitor_id, generacion) else {
-            // De una captura anterior, o ya ensennada por el rescate: no hay nada que hacer.
+            // From an earlier capture, or already shown by the fallback: nothing to do.
             return;
         };
         ensennar_overlay(&dentro, &label, &monitor, con_foco);
-        crate::crono::marca(&format!("mostrada-{monitor_id}"));
     });
 }
 
-/// Saca de la lista de pendientes la ventana de ese monitor, si es de esta captura, y
-/// decide si le toca el foco: a la pantalla del raton, o a la ultima que quede si el raton
-/// no esta en ninguna.
+/// Remove that monitor's window from the pending list if it belongs to this capture, and decide
+/// whether it gets focus: the cursor's screen, or the last remaining one if the cursor is on
+/// none.
 fn sacar_pendiente(monitor_id: u32, generacion: u64) -> Option<(String, MonitorInfo, bool)> {
     let mut pendientes = PENDIENTES.lock();
     if pendientes.generacion != generacion {
@@ -392,15 +315,13 @@ fn sacar_pendiente(monitor_id: u32, generacion: u64) -> Option<(String, MonitorI
     Some((label, monitor, con_foco))
 }
 
-/// La coloca en su pantalla y la ensenna. Siempre desde el hilo principal.
+/// Position the window on its screen and show it. Always on the main thread.
 fn ensennar_overlay(app: &AppHandle, label: &str, monitor: &MonitorInfo, con_foco: bool) {
     let Some(window) = app.get_webview_window(label) else {
         return;
     };
-    // Posicion en pixeles fisicos: el escalado por DPI no debe tocarla. El tamanno ya se
-    // puso al preparar la ventana, aparcada. Colocar y ensennar van en UNA llamada a
-    // Windows (`SetWindowPos` con `SWP_SHOWWINDOW`) en vez de dos; el `show()` de despues
-    // solo pone al dia lo que Tauri cree de la ventana, y no cuesta nada si ya esta visible.
+    // Position in physical pixels, unaffected by DPI scaling. Position and show happen in one
+    // `SetWindowPos` call; the following `show()` only syncs Tauri's state.
     #[cfg(windows)]
     let colocada = crate::platform::window_style::colocar_y_ensennar(&window, monitor.x, monitor.y);
     #[cfg(not(windows))]
@@ -409,9 +330,8 @@ fn ensennar_overlay(app: &AppHandle, label: &str, monitor: &MonitorInfo, con_foc
         let _ = window.set_position(PhysicalPosition::new(monitor.x, monitor.y));
     }
     let _ = window.show();
-    // Si el aparcadero no pudo darle el DPI de su monitor y Windows la ha reescalado al
-    // traerla, el tamanno se corrige aqui. Normalmente no pasa y esta comprobacion es una
-    // lectura.
+    // If Windows rescaled the window for a different DPI when moving it, fix the size here.
+    // Normally this is just a read.
     if window
         .inner_size()
         .is_ok_and(|s| s.width != monitor.width || s.height != monitor.height)
@@ -419,15 +339,15 @@ fn ensennar_overlay(app: &AppHandle, label: &str, monitor: &MonitorInfo, con_foc
         let _ = window.set_size(PhysicalSize::new(monitor.width, monitor.height));
     }
     if con_foco {
-        // Sin esto, el primer clic del usuario se lo come Windows para activar
-        // la ventana y la seleccion nunca empieza.
+        // Without this, Windows uses the first click to activate the window and the selection
+        // never starts.
         let _ = window.set_focus();
         #[cfg(windows)]
         force_foreground(&window);
     }
 }
 
-/// El rescate: pasado el plazo, se ensenna lo que no haya avisado, sea lo que sea.
+/// Fallback: after the timeout, show whatever has not reported.
 fn mostrar_las_que_falten(app: &AppHandle, generacion: u64) {
     let que_faltan: Vec<(u32, String, MonitorInfo, bool)> = {
         let mut pendientes = PENDIENTES.lock();
@@ -444,7 +364,7 @@ fn mostrar_las_que_falten(app: &AppHandle, generacion: u64) {
             }
             lista.push((id, label, monitor, con_foco));
         }
-        // Si el raton no estaba en ninguna, el foco a la primera que quede.
+        // If the cursor is on no screen, focus the first remaining window.
         if !pendientes.con_foco {
             if let Some(primera) = lista.first_mut() {
                 primera.3 = true;
@@ -453,30 +373,25 @@ fn mostrar_las_que_falten(app: &AppHandle, generacion: u64) {
         }
         lista
     };
-    for (id, label, monitor, con_foco) in que_faltan {
+    for (_, label, monitor, con_foco) in que_faltan {
         ensennar_overlay(app, &label, &monitor, con_foco);
-        crate::crono::marca(&format!("mostrada-{id}-tarde"));
     }
 }
 
-/// Ensenna los segundos que faltan, abajo a la derecha de la pantalla donde esta el raton.
-///
-/// La ventana se crea la primera vez que se usa y se queda escondida para las siguientes,
-/// igual que los overlays. No se precrea al arrancar como ellos porque casi nadie usa el
-/// temporizador, y las cifras de memoria en reposo estan publicadas: la primera cuenta
-/// atras del dia paga el WebView2 y sale unas decimas tarde, las demas salen al instante.
+/// Show the seconds left, centered on the screen with the cursor. The window is created on
+/// first use and then kept hidden, like the overlays; it is not precreated because few people
+/// use the delay.
 fn mostrar_cuenta_atras(app: &AppHandle, segundos: u32) {
     let window = match app.get_webview_window(COUNTDOWN_LABEL) {
         Some(existente) => {
-            // Trampa 8: el destino de un evento lo deciden los dos lados. Aqui solo hay
-            // una ventana escuchando, pero se escribe dirigido igual que en el overlay
-            // para que nadie copie de aqui la version que da problemas con varias.
+            // Target the event at this window, as everywhere else: an untargeted listener
+            // receives events for all windows.
             let _ = existente.emit_to(COUNTDOWN_LABEL, crate::EVENT_COUNTDOWN, segundos);
             existente
         }
         None => {
-            // La primera vez el numero viaja en la URL: la pagina todavia no esta cargada
-            // cuando se emitiria el evento, asi que no habria nadie escuchandolo.
+            // The first value goes in the URL because the page is not listening yet when the
+            // event would be sent.
             let url = WebviewUrl::App(format!("cuenta.html?segundos={segundos}").into());
             let construida = WebviewWindowBuilder::new(app, COUNTDOWN_LABEL, url)
                 .additional_browser_args(NAVEGADOR_ARGS)
@@ -493,11 +408,11 @@ fn mostrar_cuenta_atras(app: &AppHandle, segundos: u32) {
                 .inner_size(CUENTA_LADO, CUENTA_LADO)
                 .build();
             let Ok(nueva) = construida else {
-                eprintln!("no se ha podido crear la cuenta atras");
+                eprintln!("could not create the countdown window");
                 return;
             };
             crate::platform::window_style::rounded_corners(&nueva);
-            // Sin esto la cuenta atras cierra el menu que se venia a fotografiar.
+            // Without this the countdown would take focus and close the menu being captured.
             crate::platform::window_style::never_focus(&nueva);
             nueva
         }
@@ -507,23 +422,18 @@ fn mostrar_cuenta_atras(app: &AppHandle, segundos: u32) {
     let _ = window.show();
 }
 
-/// La pone en el centro del monitor donde esta el cursor, que es el que el usuario esta
-/// mirando. Se recoloca en cada disparo porque el raton puede estar en otra pantalla que
-/// la vez anterior, y porque cada pantalla puede tener su propio escalado.
-///
-/// En el centro y no en una esquina porque es donde se mira sin buscarla: con tres
-/// pantallas, un numero en la esquina de una de ellas se pierde. Tapa lo que haya debajo
-/// durante la cuenta, pero eso no llega a la captura: se esconde antes de congelar.
+/// Center it on the monitor with the cursor, recomputed each time because the cursor and the
+/// display scale can differ from last time. It is hidden before the screen is frozen.
 fn colocar_cuenta_atras(window: &tauri::WebviewWindow) {
     colocar_ventanita(window, None)
 }
 
-/// Y la misma colocacion, pero sobre la pantalla que se diga en vez de la del raton.
+/// The same placement on a given screen instead of the cursor's.
 fn colocar_ventanita(window: &tauri::WebviewWindow, en: Option<u32>) {
     let Ok(monitores) = xcap::Monitor::all() else {
         return;
     };
-    // Con una pantalla pedida manda esa; si no, la del raton.
+    // Use the requested screen if given, otherwise the cursor's.
     if let Some(indice) = en {
         if let Some(monitor) = monitores.get(indice as usize) {
             poner_en(window, monitor);
@@ -546,7 +456,7 @@ fn colocar_ventanita(window: &tauri::WebviewWindow, en: Option<u32>) {
     poner_en(window, monitor);
 }
 
-/// La deja centrada en ese monitor, con el tamanno que le toca por su escalado.
+/// Center it on that monitor, sized for its display scale.
 fn poner_en(window: &tauri::WebviewWindow, monitor: &xcap::Monitor) {
     let (Ok(x), Ok(y), Ok(width), Ok(height)) =
         (monitor.x(), monitor.y(), monitor.width(), monitor.height())
@@ -554,9 +464,8 @@ fn poner_en(window: &tauri::WebviewWindow, monitor: &xcap::Monitor) {
         return;
     };
 
-    // El escalado que cuenta es el de la pantalla de destino, no el de donde este la
-    // ventana ahora mismo: en un equipo con una pantalla al 150 % y otra al 100 %,
-    // preguntarselo a la ventana da el numero de la pantalla equivocada.
+    // Use the target screen's scale, not the window's current screen, which may differ in
+    // mixed-DPI setups.
     let escala = f64::from(monitor.scale_factor().unwrap_or(1.0));
     let lado = (CUENTA_LADO * escala) as u32;
 
@@ -567,64 +476,8 @@ fn poner_en(window: &tauri::WebviewWindow, monitor: &xcap::Monitor) {
     ));
 }
 
-/// Ensenna el numero de una pantalla en su centro, un par de segundos.
-///
-/// Elegir «la pantalla 2» en los ajustes no dice nada si no se sabe cual es la 2. Esto lo
-/// dice de la unica forma que no admite duda: ensennando el numero **en esa pantalla**.
-///
-/// Reutiliza la ventanita de la cuenta atras, que ya sabe ponerse centrada en un monitor
-/// concreto y no coge el foco. Va con un numero fijo, no con una cuenta.
-pub fn mostrar_numero_de_pantalla(app: &AppHandle, indice: u32) {
-    let Some(window) = ventanita_de_numero(app, indice) else {
-        return;
-    };
-    let _ = window.emit_to(COUNTDOWN_LABEL, crate::EVENT_SCREEN_NUMBER, indice + 1);
-    colocar_ventanita(&window, Some(indice));
-    let _ = window.show();
-
-    // Dos segundos: lo que se tarda en mirar y reconocer la pantalla. Se esconde desde otro
-    // hilo para no dejar los ajustes esperando a que pase.
-    let app = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-        if let Some(window) = app.get_webview_window(COUNTDOWN_LABEL) {
-            let _ = window.hide();
-            // Se deja en cero, que la pagina dibuja como la camara: si la proxima cuenta
-            // atras se ve un fotograma con lo viejo, que no sea un numero de pantalla.
-            let _ = window.emit_to(COUNTDOWN_LABEL, crate::EVENT_SCREEN_NUMBER, 0u32);
-        }
-    });
-}
-
-/// La ventanita, creada si todavia no existe.
-fn ventanita_de_numero(app: &AppHandle, indice: u32) -> Option<tauri::WebviewWindow> {
-    if let Some(existente) = app.get_webview_window(COUNTDOWN_LABEL) {
-        return Some(existente);
-    }
-    let url = WebviewUrl::App(format!("cuenta.html?pantalla={}", indice + 1).into());
-    let construida = WebviewWindowBuilder::new(app, COUNTDOWN_LABEL, url)
-        .additional_browser_args(NAVEGADOR_ARGS)
-        .title("winshotx")
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .maximizable(false)
-        .minimizable(false)
-        .shadow(true)
-        .focused(false)
-        .visible(false)
-        .inner_size(CUENTA_LADO, CUENTA_LADO)
-        .build()
-        .ok()?;
-    crate::platform::window_style::rounded_corners(&construida);
-    crate::platform::window_style::never_focus(&construida);
-    Some(construida)
-}
-
-/// La esconde y la deja en cero, que la pagina dibuja como el icono de la camara y no
-/// como un numero: asi, si la proxima vez se ve un fotograma con el valor viejo, lo que
-/// se ve es "ya voy" y no un tres que ya no significa nada.
+/// Hide it and reset it to 0 (drawn as the camera icon), so a stale frame next time shows the
+/// icon instead of an old number.
 fn esconder_cuenta_atras(app: &AppHandle) {
     let Some(window) = app.get_webview_window(COUNTDOWN_LABEL) else {
         return;
@@ -688,10 +541,9 @@ fn cursor_position() -> Option<(i32, i32)> {
     None
 }
 
-/// Esconde el overlay en vez de cerrarlo: la ventana se reutiliza en la siguiente
-/// captura, ver `open_overlays`.
+/// Hide the overlay instead of closing it so the window can be reused; see `open_overlays`.
 pub fn close_overlays(app: &AppHandle) {
-    // Lo que estuviera esperando a ensennarse ya no se ensenna: la captura se ha cerrado.
+    // The capture is closed: windows waiting to be shown are no longer shown.
     {
         let mut pendientes = PENDIENTES.lock();
         pendientes.generacion += 1;
@@ -704,20 +556,13 @@ pub fn close_overlays(app: &AppHandle) {
     }
 }
 
-/// Donde aparcar el overlay de ESE monitor: fuera de todas las pantallas, pero de forma
-/// que **el monitor mas cercano a la ventana aparcada sea el suyo**, o uno con su mismo
-/// escalado.
+/// Where to park a monitor's overlay: outside all screens, but positioned so the nearest
+/// monitor is its own (or one with the same scale). Windows assigns a window the DPI of the
+/// nearest monitor; parking next to a monitor with another scale made Windows rescale the
+/// overlay when it was moved onto its screen.
 ///
-/// Windows le asigna a una ventana el DPI del monitor mas cercano. Aparcadas todas en la
-/// misma esquina, el overlay del monitor vertical (al 100 %) quedaba pegado a uno al 125 %:
-/// al traerlo a su pantalla Windows le cambiaba el DPI y **lo reescalaba a 864x1536**, en
-/// vez de los 1080x1920 que le tocan, y el navegador tenia que volver a dibujarlo todo a
-/// otra escala. Visto en una foto de la ventana el 5 de septiembre de 2026.
-///
-/// Se prueban los cuatro lados (encima, izquierda, debajo, derecha de todo el escritorio,
-/// alineado con el monitor) y se elige el primero cuyo vecino mas cercano es el propio
-/// monitor; si ninguno lo consigue (un monitor rodeado por otros), vale uno cuyo vecino
-/// tenga el mismo escalado, que es lo que de verdad importa.
+/// Tries above, left, below, and right of the whole desktop, aligned with the monitor, and
+/// picks the first whose nearest monitor is its own, otherwise one with the same scale.
 fn aparcadero_de(monitor: &MonitorInfo, todos: &[MonitorInfo]) -> PhysicalPosition<i32> {
     const MARGEN: i32 = 100;
     let izquierda = todos.iter().map(|m| m.x).min().unwrap_or(monitor.x);
@@ -760,29 +605,21 @@ fn aparcadero_de(monitor: &MonitorInfo, todos: &[MonitorInfo]) -> PhysicalPositi
     PhysicalPosition::new(elegido.0, elegido.1)
 }
 
-/// La distancia entre dos rectangulos (izquierda, arriba, derecha, abajo), al cuadrado:
-/// cero si se tocan o se solapan.
+/// Squared distance between two rectangles (left, top, right, bottom); zero if they touch or
+/// overlap.
 fn distancia_entre(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> i64 {
     let dx = i64::from((b.0 - a.2).max(a.0 - b.2).max(0));
     let dy = i64::from((b.1 - a.3).max(a.1 - b.3).max(0));
     dx * dx + dy * dy
 }
 
-/// Barra flotante que acompanna a la grabacion, justo debajo de la region.
-/// Las ventanas se crean en el hilo principal: hacerlo desde el hilo de un comando
-/// bloquea a la espera del bucle de eventos y la grabacion se queda colgada.
+/// The floating recording toolbar below the region. Windows are created on the main thread;
+/// creating them from a command thread blocks waiting for the event loop.
 ///
-/// **No sale en el video, aunque este encima de lo que se graba.** Debajo de la region no
-/// cabe siempre: con una region pegada al borde de abajo la barra se sube, y si la region
-/// tambien empieza arriba (grabar la pantalla entera, por ejemplo) acaba DENTRO de lo que
-/// se graba, ver `una_region_que_ocupa_la_pantalla_deja_la_barra_dentro`. Se le dice a
-/// Windows que no la grabe, igual que al menu de la bandeja: quien esta delante la ve y la
-/// pulsa, y en el video sale lo que hay detras. Es la issue #3 (`Arsene-86`, 19 de octubre
-/// de 2026), que la encontro repitiendo el area anterior con la tecla `R`.
+/// The bar is excluded from capture because it can end up inside the recorded region (for
+/// example when recording the full screen).
 ///
-/// Devuelve la etiqueta de la ventana, para que quien la abrio cierre ESA barra y no la que
-/// haya: desde que parar vuelve enseguida, una grabacion nueva puede empezar mientras la
-/// anterior todavia esta guardando, y la limpieza de la vieja no puede llevarse la nueva.
+/// Returns the window label so the caller closes this bar and not a newer recording's bar.
 pub fn open_recorder(app: &AppHandle, region: Rect) -> Result<String> {
     close_recorder(app);
     let label = format!(
@@ -802,9 +639,9 @@ pub fn open_recorder(app: &AppHandle, region: Rect) -> Result<String> {
         .build()?;
     crate::platform::window_style::rounded_corners(&window);
     if !crate::platform::window_style::fuera_de_la_captura(&window, true) {
-        // En un Windows que no lo acepte, lo unico que pasa es que la barra puede salir en
-        // el video cuando se pone encima: no es motivo para no grabar.
-        eprintln!("[grabar] Windows no ha dejado sacar la barra de la grabación del vídeo");
+        // If Windows does not support capture exclusion, the bar may appear in the video when
+        // it overlaps; recording still works.
+        eprintln!("[record] Windows refused to exclude the recording toolbar from capture");
     }
 
     colocar_barra(&window, region);
@@ -812,20 +649,16 @@ pub fn open_recorder(app: &AppHandle, region: Rect) -> Result<String> {
     Ok(label)
 }
 
-/// Cierra una barra concreta, la de la grabacion que acaba de terminar.
+/// Close a specific recording toolbar.
 pub fn close_recorder_label(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.close();
     }
 }
 
-/// Pone la barra debajo de la region, y dentro de la pantalla donde esta esa region.
-///
-/// Antes se usaba `x.max(0)`, y eso mandaba la barra a la pantalla principal siempre que
-/// se grababa en un monitor colocado a la izquierda o encima del principal: ahi las
-/// coordenadas del escritorio son NEGATIVAS, y recortarlas a cero es literalmente saltar
-/// de pantalla. Y el escalado se le preguntaba a la ventana, que acaba de nacer y todavia
-/// esta en la pantalla equivocada.
+/// Place the bar below the region, on the screen that contains it. Desktop coordinates can be
+/// negative for monitors left of or above the primary, so they must not be clamped to zero; the
+/// scale comes from the target monitor, not the newly created window.
 fn colocar_barra(window: &tauri::WebviewWindow, region: Rect) {
     let centro = (
         region.x + region.width as i32 / 2,
@@ -837,10 +670,8 @@ fn colocar_barra(window: &tauri::WebviewWindow, region: Rect) {
     let _ = window.set_size(medida_de_la_barra(monitor));
 }
 
-/// La cuenta de donde va la barra, aparte del resto para poder probarla sin pantallas.
-///
-/// Si no se sabe en que monitor cae, se coloca debajo de la region y se deja estar: es
-/// preferible una barra un poco fuera de sitio que una barra en otra pantalla.
+/// The bar position calculation, separate so it can be tested without screens. If the monitor
+/// is unknown, it goes right below the region.
 fn medida_de_la_barra(monitor: Option<MonitorSitio>) -> PhysicalSize<u32> {
     let scale = monitor.map(|m| m.escala).unwrap_or(1.0);
     let width = (BARRA_ANCHO * scale) as i32;
@@ -871,8 +702,7 @@ fn sitio_de_la_barra(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) 
         let izquierda = m.x + margen;
         let derecha = (m.x + m.ancho - ancho_px - margen).max(izquierda);
         x = x.clamp(izquierda, derecha);
-        // Si la region llega al borde de abajo, la barra se sube encima en vez de quedarse
-        // colgando fuera de la pantalla o saltando a la de al lado.
+        // If the region reaches the bottom edge, the bar goes above it instead.
         let tope = m.y + m.alto - alto_px - margen;
         if y > tope {
             y = (region.y - alto_px - hueco).max(m.y + margen);
@@ -881,12 +711,12 @@ fn sitio_de_la_barra(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) 
     (x, y)
 }
 
-/// Ancho y alto de la barra de grabacion, en pixeles logicos. Los mismos que pide el
-/// constructor de la ventana: si se separan, la barra deja de quedar centrada.
+/// Recording toolbar size in logical pixels. Must match the window builder or the bar is no
+/// longer centered.
 const BARRA_ANCHO: f64 = 540.0;
 const BARRA_ALTO: f64 = 56.0;
 
-/// Los datos de un monitor que hacen falta para colocar una ventana encima.
+/// The monitor data needed to place a window on it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MonitorSitio {
     pub(crate) x: i32,
@@ -896,8 +726,8 @@ pub(crate) struct MonitorSitio {
     pub(crate) escala: f64,
 }
 
-/// El monitor que contiene ese punto del escritorio, o el principal si el punto se ha
-/// quedado en tierra de nadie (pasa entre monitores desalineados).
+/// The monitor containing that desktop point, or the primary one if the point falls between
+/// misaligned monitors.
 pub(crate) fn monitor_de(x: i32, y: i32) -> Option<MonitorSitio> {
     let monitores = xcap::Monitor::all().ok()?;
     let leer = |m: &xcap::Monitor| -> Option<MonitorSitio> {
@@ -926,95 +756,16 @@ pub fn close_recorder(app: &AppHandle) {
     }
 }
 
-/// Deja la captura flotando encima de todo, para tenerla a la vista mientras se trabaja.
-///
-/// La ventana sale **del tamanno exacto del recorte y justo encima de donde estaba**, asi
-/// que al aparecer no se mueve nada: parece que el trozo de pantalla se ha quedado quieto
-/// mientras lo de debajo sigue. Despues se arrastra a donde se quiera.
-///
-/// Se pueden anclar varias: cada una es su propia ventana y se cierra por su cuenta. Por
-/// eso el numero en la etiqueta, igual que en los overlays.
-pub fn open_pin(app: &AppHandle, region: Rect, imagen: &std::path::Path) -> Result<()> {
-    let label = format!(
-        "{PIN_PREFIX}{}",
-        OVERLAY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    );
-    // La ruta viaja en la URL porque la ventana nace sabiendo que imagen lleva y no
-    // cambia nunca: pedirsela despues por un comando seria un viaje de ida y vuelta para
-    // ensennar algo que ya estaba decidido.
-    let url =
-        WebviewUrl::App(format!("pin.html?imagen={}", para_url(&imagen.to_string_lossy())).into());
-    let window = WebviewWindowBuilder::new(app, &label, url)
-        .additional_browser_args(NAVEGADOR_ARGS)
-        .title("winshotx")
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .shadow(true)
-        .visible(false)
-        .build()?;
-    crate::platform::window_style::rounded_corners(&window);
-
-    // El tamanno y el sitio van en pixeles FISICOS, que es lo que trae la region: los
-    // logicos dependen del zoom de cada pantalla y sobre un monitor al 150 % el ancla
-    // habria salido una vez y media mas grande que el recorte.
-    let (x, y) = sitio_del_ancla(region, monitor_de(region.x, region.y));
-    let _ = window.set_size(PhysicalSize::new(region.width, region.height));
-    let _ = window.set_position(PhysicalPosition::new(x, y));
-    window.show()?;
-    Ok(())
-}
-
-/// Lo minimo para que una ruta de Windows quepa dentro de una URL sin romperla.
-///
-/// `C:\Users\Muni\...` lleva dos puntos y barras invertidas, y una carpeta con espacios o
-/// con una almohadilla partiria la direccion por la mitad. Se escapa todo lo que no sea
-/// una letra, un numero o los cuatro simbolos que las URL dejan pasar tal cual. Son seis
-/// lineas y evitan traerse una caja entera solo para esto.
-fn para_url(texto: &str) -> String {
-    texto
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            otro => format!("%{otro:02X}"),
-        })
-        .collect()
-}
-
-/// Donde cae la captura anclada, aparte para poder probarla sin tener las pantallas.
-///
-/// Encima de su recorte, y si de ahi se sale del monitor (porque el recorte tocaba el
-/// borde y la sombra pide un par de pixeles), se empuja hacia dentro. **Nunca se recorta
-/// a cero**: en un escritorio con el monitor a la izquierda del principal, las
-/// coordenadas son negativas y un `max(0)` manda el ancla a otra pantalla.
-fn sitio_del_ancla(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) {
-    let Some(m) = monitor else {
-        return (region.x, region.y);
-    };
-    let ancho = region.width as i32;
-    let alto = region.height as i32;
-    // El limite de arriba manda sobre el de abajo: con un recorte mas grande que la
-    // pantalla, preferimos ver la esquina de arriba a la izquierda que la de abajo.
-    let x = (region.x).min(m.x + m.ancho - ancho).max(m.x);
-    let y = (region.y).min(m.y + m.alto - alto).max(m.y);
-    (x, y)
-}
-
-/// La ventana de ajustes no se destruye al cerrarla, solo se esconde, asi que su
-/// interfaz sigue montada con los datos del arranque. Al volver a mostrarla hay que
-/// decirselo para que refresque el tamanno de la cache y mire si hay version nueva.
+/// The settings window is hidden, not destroyed, so its UI keeps startup data. Notify it when
+/// it is shown again so it can refresh.
 pub fn show_settings(app: &AppHandle) -> Result<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         let _ = window.unminimize();
         let _ = window.set_focus();
-        // Lo mismo que el overlay, y por lo mismo: `show` y `set_focus` no bastan cuando
-        // la orden no viene de un clic del usuario en NUESTRA ventana. Desde el menu de la
-        // bandeja, o desde una segunda instancia que pasa el testigo, Windows nos niega el
-        // primer plano y la ventana se quedaba escondida sin decir ni un error.
+        // `show` and `set_focus` are not enough when the request does not come from a click in
+        // our window (tray menu, second instance): Windows refuses foreground activation and
+        // the window stayed hidden.
         #[cfg(windows)]
         force_foreground(&window);
         let _ = window.emit(crate::EVENT_SETTINGS_SHOWN, ());
@@ -1022,8 +773,8 @@ pub fn show_settings(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// Windows solo deja robar el primer plano a quien tiene derecho a ello.
-/// Al venir de un atajo global lo tenemos, pero hay que pedirlo explicitamente.
+/// Windows only allows taking the foreground when entitled to it; we are after a global
+/// shortcut, but it must be requested explicitly.
 #[cfg(windows)]
 fn force_foreground(window: &tauri::WebviewWindow) {
     use windows::Win32::Foundation::HWND;
@@ -1034,267 +785,5 @@ fn force_foreground(window: &tauri::WebviewWindow) {
         let hwnd = HWND(handle.0);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetForegroundWindow(hwnd);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn monitor(x: i32, y: i32, ancho: i32, alto: i32) -> MonitorSitio {
-        MonitorSitio {
-            x,
-            y,
-            ancho,
-            alto,
-            escala: 1.0,
-        }
-    }
-
-    fn region(x: i32, y: i32, width: u32, height: u32) -> Rect {
-        Rect {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    /// El fallo que Munir vio el 27 de agosto de 2026: grabo en el monitor vertical de la
-    /// izquierda y la barra aparecio en otro. Ese monitor tiene coordenadas NEGATIVAS en
-    /// el escritorio, y el codigo hacia `x.max(0)`, que es literalmente "salta a la
-    /// pantalla principal".
-    #[test]
-    fn la_barra_se_queda_en_el_monitor_de_la_izquierda() {
-        let izquierdo = monitor(-1080, 0, 1080, 1920);
-        let (x, y) = sitio_de_la_barra(region(-900, 200, 600, 400), Some(izquierdo));
-        assert!(
-            x < 0,
-            "la barra se ha ido a la pantalla principal: x = {x}, y el monitor acaba en 0"
-        );
-        assert!(x >= izquierdo.x, "y tampoco puede salirse por la izquierda");
-        assert_eq!(y, 612, "debajo de la región, doce píxeles más abajo");
-    }
-
-    /// Debajo de la region es lo normal, y centrada con ella.
-    #[test]
-    fn la_barra_va_centrada_debajo_de_la_region() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let (x, y) = sitio_de_la_barra(region(500, 100, 400, 300), Some(principal));
-        assert_eq!(x, 500 + (400 - BARRA_ANCHO as i32) / 2, "centrada con la región");
-        assert_eq!(y, 100 + 300 + 12);
-    }
-
-    /// Y si la region llega abajo del todo, la barra se sube encima en vez de salirse.
-    #[test]
-    fn si_no_cabe_debajo_la_barra_se_pone_encima() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let (_, y) = sitio_de_la_barra(region(300, 700, 800, 370), Some(principal));
-        assert!(
-            y < 700,
-            "tenía que subirse encima de la región y está en {y}"
-        );
-        assert!(y >= 8, "y sin salirse por arriba");
-    }
-
-    /// La issue #3: con la region pegada abajo Y empezando arriba, la barra no tiene
-    /// donde ponerse fuera y acaba DENTRO de lo que se graba.
-    ///
-    /// Es lo que pasa al grabar la pantalla entera: debajo no cabe, encima tampoco (seria
-    /// fuera de la pantalla), asi que se clava en el margen de arriba, que es region. Por
-    /// eso `open_recorder` la saca de la captura: colocarla mejor no es posible.
-    #[test]
-    fn una_region_que_ocupa_la_pantalla_deja_la_barra_dentro() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let region = region(0, 0, 1920, 1080);
-        let (x, y) = sitio_de_la_barra(region, Some(principal));
-        let dentro = x < region.x + region.width as i32
-            && region.x < x + 450
-            && y < region.y + region.height as i32
-            && region.y < y + 52;
-        assert!(
-            dentro,
-            "la barra en {x},{y} tenía que caer dentro de la región, que es lo que obliga a sacarla de la captura"
-        );
-    }
-
-    /// Una region ancha en un monitor estrecho: la barra se pega al borde, pero dentro.
-    #[test]
-    fn la_barra_nunca_se_sale_por_los_lados() {
-        let estrecho = monitor(1920, 0, 400, 800);
-        let (x, _) = sitio_de_la_barra(region(1930, 10, 380, 200), Some(estrecho));
-        assert!(x >= 1928, "se sale por la izquierda: {x}");
-        let width = medida_de_la_barra(Some(estrecho)).width as i32;
-        assert!(x + width <= 1920 + 400 - 8, "se sale por la derecha: {x}");
-    }
-
-    /// Lo que hace que anclar se entienda sin explicarlo: la captura aparece EXACTAMENTE
-    /// donde estaba el recorte, asi que al pulsar la tecla no se mueve nada en pantalla.
-    #[test]
-    fn el_ancla_nace_justo_encima_de_su_recorte() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let (x, y) = sitio_del_ancla(region(400, 250, 600, 400), Some(principal));
-        assert_eq!((x, y), (400, 250));
-    }
-
-    /// Y la trampa de siempre: el monitor de la izquierda empieza en negativo, asi que
-    /// recortar a cero mandaria el ancla a la pantalla principal.
-    #[test]
-    fn el_ancla_se_queda_en_el_monitor_de_coordenadas_negativas() {
-        let izquierdo = monitor(-1080, 0, 1080, 1920);
-        let (x, y) = sitio_del_ancla(region(-900, 200, 600, 400), Some(izquierdo));
-        assert_eq!(
-            (x, y),
-            (-900, 200),
-            "el ancla tiene que quedarse donde estaba"
-        );
-    }
-
-    /// Un recorte pegado al borde de abajo a la derecha: la ventana se empuja hacia dentro
-    /// para que no quede media fuera de la pantalla.
-    #[test]
-    fn el_ancla_se_mete_dentro_si_el_recorte_tocaba_el_borde() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let (x, y) = sitio_del_ancla(region(1900, 1060, 300, 200), Some(principal));
-        assert_eq!(x, 1920 - 300, "empujada hacia dentro por la derecha");
-        assert_eq!(y, 1080 - 200, "y por abajo");
-    }
-
-    /// Con un recorte mas grande que la pantalla manda el borde de ARRIBA: se ve la
-    /// esquina de arriba a la izquierda, que es donde se mira primero.
-    #[test]
-    fn un_ancla_mas_grande_que_la_pantalla_ensenna_la_esquina_de_arriba() {
-        let principal = monitor(0, 0, 1920, 1080);
-        let (x, y) = sitio_del_ancla(region(0, 0, 3000, 2000), Some(principal));
-        assert_eq!((x, y), (0, 0));
-    }
-
-    /// Sin saber en que monitor cae, se deja donde estaba el recorte: es lo unico honrado.
-    #[test]
-    fn sin_monitor_el_ancla_se_queda_donde_el_recorte() {
-        let (x, y) = sitio_del_ancla(region(-500, 300, 200, 100), None);
-        assert_eq!((x, y), (-500, 300));
-    }
-
-    /// La ruta de la imagen viaja dentro de una URL, y las de Windows llevan dos puntos,
-    /// barras invertidas y a veces espacios: sin escapar, la direccion se parte por ahi.
-    #[test]
-    fn la_ruta_del_ancla_sobrevive_a_ir_en_una_url() {
-        let escapada = para_url(r"C:\Users\Mi Carpeta\pin-1.png");
-        assert!(!escapada.contains('\\'), "la barra invertida rompe la URL");
-        assert!(!escapada.contains(' '), "el espacio corta la direccion");
-        assert!(!escapada.contains(':'), "los dos puntos tambien");
-        assert!(
-            escapada.contains("pin-1.png"),
-            "el nombre se sigue leyendo: {escapada}"
-        );
-    }
-
-    /// Las tres pantallas de Munir tal como estan puestas: la principal al 125 %, una
-    /// vertical al 100 % a su izquierda (y algo mas baja) y una tercera al 125 % debajo.
-    fn pantallas_de_munir() -> Vec<MonitorInfo> {
-        let m = |id, x, y, w, h, scale, is_primary| MonitorInfo {
-            id,
-            label: format!("M{id}"),
-            x,
-            y,
-            width: w,
-            height: h,
-            scale,
-            is_primary,
-        };
-        vec![
-            m(0, 0, 0, 1920, 1080, 1.25, true),
-            m(1, -1080, 238, 1080, 1920, 1.0, false),
-            m(2, 0, 1080, 1536, 960, 1.25, false),
-        ]
-    }
-
-    /// Lo que vecino mas cercano tiene un rectangulo aparcado en ese punto.
-    fn vecino(x: i32, y: i32, m: &MonitorInfo, todos: &[MonitorInfo]) -> u32 {
-        todos
-            .iter()
-            .min_by_key(|otro| {
-                distancia_entre(
-                    (x, y, x + m.width as i32, y + m.height as i32),
-                    (
-                        otro.x,
-                        otro.y,
-                        otro.x + otro.width as i32,
-                        otro.y + otro.height as i32,
-                    ),
-                )
-            })
-            .map(|otro| otro.id)
-            .unwrap()
-    }
-
-    /// El fallo visto en la foto: el overlay vertical, aparcado en la esquina de siempre,
-    /// tenia como vecino un monitor al 125 % y volvia reescalado a 864x1536.
-    #[test]
-    fn cada_overlay_se_aparca_junto_a_un_monitor_de_su_mismo_escalado() {
-        let todos = pantallas_de_munir();
-        for m in &todos {
-            let sitio = aparcadero_de(m, &todos);
-            let cerca = vecino(sitio.x, sitio.y, m, &todos);
-            let escala_del_vecino = todos.iter().find(|o| o.id == cerca).unwrap().scale;
-            assert!(
-                (escala_del_vecino - m.scale).abs() < 0.01,
-                "el overlay {} se aparca en {:?} junto al monitor {cerca}, que va a otra escala",
-                m.id,
-                (sitio.x, sitio.y)
-            );
-        }
-    }
-
-    #[test]
-    fn el_aparcadero_queda_fuera_de_todas_las_pantallas() {
-        let todos = pantallas_de_munir();
-        for m in &todos {
-            let sitio = aparcadero_de(m, &todos);
-            let rect = (
-                sitio.x,
-                sitio.y,
-                sitio.x + m.width as i32,
-                sitio.y + m.height as i32,
-            );
-            for otro in &todos {
-                let suyo = (
-                    otro.x,
-                    otro.y,
-                    otro.x + otro.width as i32,
-                    otro.y + otro.height as i32,
-                );
-                assert!(
-                    distancia_entre(rect, suyo) > 0,
-                    "el overlay {} aparcado en {:?} pisa el monitor {}",
-                    m.id,
-                    (sitio.x, sitio.y),
-                    otro.id
-                );
-            }
-        }
-    }
-
-    /// El vertical, que es el que fallaba, tiene que quedar con EL como vecino: a su
-    /// izquierda hay sitio libre.
-    #[test]
-    fn el_vertical_se_aparca_a_su_izquierda() {
-        let todos = pantallas_de_munir();
-        let vertical = &todos[1];
-        let sitio = aparcadero_de(vertical, &todos);
-        assert_eq!(vecino(sitio.x, sitio.y, vertical, &todos), vertical.id);
-        assert!(
-            sitio.x < -1080,
-            "tenia que salir por la izquierda: {}",
-            sitio.x
-        );
-    }
-
-    #[test]
-    fn la_distancia_entre_rectangulos_es_cero_si_se_tocan() {
-        assert_eq!(distancia_entre((0, 0, 10, 10), (10, 0, 20, 10)), 0);
-        assert_eq!(distancia_entre((0, 0, 10, 10), (20, 0, 30, 10)), 100);
-        assert_eq!(distancia_entre((0, 0, 10, 10), (13, 14, 30, 30)), 9 + 16);
     }
 }

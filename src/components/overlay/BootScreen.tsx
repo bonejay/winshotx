@@ -4,10 +4,10 @@ import { AlertTriangle } from "lucide-react";
 import { cancelCapture } from "../../lib/ipc";
 import { useT } from "../../lib/i18n";
 
-/** Segundos que el overlay puede estar sin fondo antes de quitarse de en medio. */
+/** Seconds the overlay may stay without a background before it closes itself. */
 const RESCATE_MS = 8000;
 
-/** Cierra el overlay por las dos vias: la limpia y, si falla, la de la propia ventana. */
+/** Close the overlay through the backend, falling back to closing the window directly. */
 async function salir() {
   try {
     await cancelCapture();
@@ -17,10 +17,8 @@ async function salir() {
 }
 
 /**
- * Lo que se ve mientras el fondo congelado todavia no esta, y lo que se ve si no
- * llega nunca. El overlay ocupa la pantalla entera y es opaco: dejarlo en negro
- * mudo equivale a secuestrar el escritorio, asi que aqui siempre hay un texto,
- * una salida a mano y un cierre automatico de rescate.
+ * Shown while the frozen background is loading, or if it never arrives. The overlay is full-
+ * screen and opaque, so it always shows text, a way out, and an automatic close.
  */
 export function BootScreen({ error }: { error: string | null }) {
   const t = useT();

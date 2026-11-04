@@ -1,11 +1,8 @@
-//! El sonido que sale por los altavoces, capturado para meterlo en el MP4.
+//! System audio (WASAPI loopback) and microphone capture for recordings.
 //!
-//! Windows lo llama *loopback*: en vez de grabar de un microfono, se abre el altavoz por
-//! defecto y se pide lo que ESTA SONANDO. No hay que pedir permiso ni desviar nada, y el
-//! usuario sigue oyendo su musica igual mientras se graba.
-//!
-//! `windows-capture` no trae el audio: entrega imagen y punto. Lo que se saca de aqui se
-//! le pasa despues al codificador con `send_audio_buffer`.
+//! Loopback opens the playback device and records what is playing, without permissions or
+//! rerouting. Captured chunks are converted to 16-bit PCM and streamed to FFmpeg by the
+//! recorder.
 
 #![cfg(windows)]
 
@@ -16,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Media::Audio::{
     eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX,
+    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -25,12 +22,12 @@ use windows::Win32::System::Com::{
 
 use crate::error::{AppError, Result};
 
-/// De donde sale el sonido que se graba.
+/// Which audio sources to record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Fuentes {
-    /// Lo que suena por los altavoces.
+    /// What plays through the speakers.
     pub sistema: bool,
-    /// Lo que entra por el microfono.
+    /// The microphone input.
     pub microfono: bool,
 }
 
@@ -40,7 +37,7 @@ impl Fuentes {
     }
 }
 
-/// Como viene el sonido: hace falta para decirle al codificador que esta recibiendo.
+/// The capture format, needed to configure the encoder input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Formato {
     pub canales: u16,
@@ -49,33 +46,32 @@ pub struct Formato {
 }
 
 impl Formato {
-    /// Cuantos bytes ocupa un instante de sonido con todos sus canales.
+    /// Bytes per audio frame across all channels.
     pub fn bytes_por_instante(&self) -> u32 {
         u32::from(self.canales) * u32::from(self.bits_por_muestra) / 8
     }
 
-    /// Cuanto dura, en cien nanosegundos, un trozo de sonido de este tamanno. Es la unidad
-    /// que usa Windows para los tiempos de los medios, y la que espera el codificador.
+    /// Duration of this many bytes in 100 ns units (the Windows media time unit).
     pub fn duracion_de(&self, bytes: usize) -> i64 {
         let por_instante = self.bytes_por_instante().max(1) as u64;
         let instantes = bytes as u64 / por_instante;
         (instantes * 10_000_000 / u64::from(self.muestras_por_segundo.max(1))) as i64
     }
 
-    /// Lo mismo, como `Duration`, para compararlo con el reloj de la maquina.
+    /// The same as a `Duration`, to compare with the wall clock.
     pub fn duracion(&self, bytes: usize) -> Duration {
         Duration::from_nanos(self.duracion_de(bytes).max(0) as u64 * 100)
     }
 }
 
-/// Un trozo de sonido tal y como lo entrega Windows, con el momento en que empieza.
+/// An audio chunk as delivered by Windows, with its start time.
 pub struct Trozo {
     pub datos: Vec<u8>,
-    /// Desde que empezo la grabacion, en cien nanosegundos.
+    /// Time since recording started, in 100 ns units.
     pub desde_el_inicio: i64,
 }
 
-/// La captura en marcha. Al soltarla se para el hilo y se cierra todo.
+/// A running capture. Dropping it stops the thread and closes everything.
 pub struct Captura {
     parar: Arc<AtomicBool>,
     hilo: Option<std::thread::JoinHandle<()>>,
@@ -85,13 +81,6 @@ pub struct Captura {
 }
 
 impl Captura {
-    /// Pide que pare y espera a que el hilo cierre COM antes de seguir.
-    pub fn parar(mut self) {
-        self.parar.store(true, Ordering::Relaxed);
-        if let Some(hilo) = self.hilo.take() {
-            let _ = hilo.join();
-        }
-    }
 }
 
 impl Drop for Captura {
@@ -103,33 +92,16 @@ impl Drop for Captura {
     }
 }
 
-/// Cada cuanto se recoge lo que haya sonando. Con menos, el hilo se pasa el dia
-/// despertandose para nada; con mucho mas, el bufer de Windows se llena y se pierde audio.
+/// Polling interval. Shorter wastes wakeups; much longer lets the Windows buffer overflow.
 const CADA: std::time::Duration = std::time::Duration::from_millis(10);
 
-/// Lo que se le pide a Windows de colchon: dos decimas. Si el hilo se retrasa mas que
-/// esto, Windows tira lo viejo y avisa con su marca de discontinuidad.
+/// Buffer requested from Windows: 200 ms. If the thread falls further behind, Windows drops old
+/// data and flags a discontinuity.
 const COLCHON_100NS: i64 = 2_000_000;
 
-/// Cuanto puede quedarse lo escrito por detras del reloj de la maquina antes de rellenar
-/// con silencio. Una decima: el maestro entrega cada diez milisegundos y su reloj no es el
-/// de la maquina, asi que por debajo de esto no hay sequia, hay jitter, y rellenar ahi
-/// meteria silencios en mitad de una cancion. Por encima, el altavoz se ha callado de
-/// verdad y lo que falta es silencio de verdad.
+/// How far written audio may lag the wall clock before silence is inserted. Below 100 ms it is
+/// normal delivery jitter; above it the device has really gone quiet.
 const SEQUIA: Duration = Duration::from_millis(100);
-
-/// Abre el altavoz por defecto y empieza a recoger lo que suena.
-///
-/// Devuelve el formato antes de arrancar el hilo a proposito: quien codifica necesita
-/// saber cuantos canales y a que frecuencia ANTES de que llegue el primer trozo.
-///
-/// `pausa` es la misma bandera que para la imagen: mientras este puesta, lo que suene se
-/// lee y se tira. Se tiene que seguir leyendo, porque si no el bufer de Windows se llena y
-/// al reanudar llega con su marca de discontinuidad; pero no puede llegar al archivo. La
-/// imagen en pausa no avanza, y el sonido tiene que quedarse en el mismo sitio que ella.
-pub fn empezar(fuentes: Fuentes, pausa: Arc<AtomicBool>) -> Result<Captura> {
-    empezar_con_dispositivos(fuentes, pausa, None, None)
-}
 
 pub fn empezar_con_dispositivos(
     fuentes: Fuentes,
@@ -142,8 +114,8 @@ pub fn empezar_con_dispositivos(
     let parar = Arc::new(AtomicBool::new(false));
     let bandera = Arc::clone(&parar);
 
-    // Todo el trabajo de COM vive en su propio hilo, del principio al fin: los objetos de
-    // audio pertenecen al hilo que los crea y no se pueden pasear por otros.
+    // All COM work happens on this one thread: audio objects belong to the thread that created
+    // them.
     let hilo = std::thread::spawn(move || {
         let resultado = capturar(
             fuentes,
@@ -155,9 +127,9 @@ pub fn empezar_con_dispositivos(
             microphone_device.as_deref(),
         );
         if let Err(error) = resultado {
-            // Si falla despues de haber dado el formato, ya no hay a quien contarselo por
-            // el canal: se deja escrito y la grabacion sigue, muda.
-            eprintln!("[winshotx] el audio del sistema se ha cortado: {error}");
+            // Failures after the format was reported cannot be sent back, so they are logged
+            // and the recording continues silently.
+            eprintln!("[winshotx] system audio capture stopped: {error}");
         }
     });
 
@@ -183,14 +155,12 @@ fn capturar(
     system_device: Option<&str>,
     microphone_device: Option<&str>,
 ) -> Result<()> {
-    // El guardian cierra COM pase lo que pase: sin esto, un error a medio camino deja el
-    // hilo con COM inicializado y la siguiente grabacion se encuentra el estropicio.
+    // Guard that uninitializes COM no matter how the thread exits.
     let _com = Com::inicializar()?;
 
-    // El maestro es el que marca el ritmo y el formato del MP4: el sistema si esta, y si
-    // no, el microfono. Solo el maestro decide cuando sale un trozo; lo del otro se le
-    // suma encima. Con dos relojes independientes marcando el compas, el sonido se
-    // desalinearia sin remedio a los pocos segundos.
+    // The master source sets the timing and format: system audio if enabled, otherwise the
+    // microphone. Only the master emits chunks; the other source is mixed on top. Two
+    // independent clocks would drift apart within seconds.
     let maestro = if fuentes.sistema {
         Dispositivo::Altavoz
     } else {
@@ -249,8 +219,8 @@ fn capturar(
         return Ok(());
     }
 
-    // El reloj de pared de la grabacion, descontando las pausas. Es el que manda cuando el
-    // maestro se calla: ver `SEQUIA`.
+    // Wall-clock recording time excluding pauses. It takes over when the master goes quiet; see
+    // `SEQUIA`.
     let mut reloj = RelojDeGrabacion::arrancar(started);
     let mut escritos: usize = 0;
     while !parar.load(Ordering::Relaxed) {
@@ -258,8 +228,7 @@ fn capturar(
         let en_pausa = pausa.load(Ordering::Relaxed);
         reloj.apuntar_pausa(en_pausa, Instant::now());
 
-        // 1. Lo que el maestro haya entregado: son sus muestras y su ritmo, y mientras
-        //    entregue, manda el.
+        // 1. Whatever the master delivered: its samples and timing take priority.
         let mut llego_algo = false;
         loop {
             let disponible = unsafe { captura.GetNextPacketSize() }
@@ -275,9 +244,8 @@ fn capturar(
                 .map_err(|e| AppError::Msg(format!("Could not acquire audio: {e}")))?;
 
             let bytes = instantes as usize * formato.bytes_por_instante() as usize;
-            // AUDCLNT_BUFFERFLAGS_SILENT vale 2: Windows dice "aqui no suena nada" y no se
-            // molesta en rellenar el bufer. Hay que meter el silencio a mano, porque si no
-            // el sonido se adelanta y se despega de la imagen.
+            // AUDCLNT_BUFFERFLAGS_SILENT (2): Windows reports silence without filling the
+            // buffer, so insert zeros manually to keep audio aligned with video.
             let trozo = if banderas & 0x2 != 0 || datos.is_null() {
                 vec![0u8; bytes]
             } else {
@@ -287,12 +255,8 @@ fn capturar(
                 .map_err(|e| AppError::Msg(format!("Could not release audio: {e}")))?;
             llego_algo = true;
 
-            // En pausa se tira lo leido, del sistema y del microfono. `escritos` no avanza,
-            // asi que el siguiente trozo que si se mande sigue pegado al anterior: para el
-            // codificador y para el archivo en crudo la pausa no ha existido, que es
-            // exactamente lo que le pasa a la imagen. Antes el sonido de la pausa se
-            // escribia igual y, tras reanudar, el video iba por delante del audio tantos
-            // segundos como hubiera durado la pausa.
+            // While paused, read data is discarded and `escritos` does not advance, so the
+            // pause does not exist in the output, exactly as for video.
             if en_pausa {
                 if let Some(mic) = acompannante.as_mut() {
                     let _ = unsafe { leer_todo(&mic.captura, mic.formato) };
@@ -302,7 +266,7 @@ fn capturar(
             }
 
             if !emitir(trozo, formato, acompannante.as_mut(), &mut escritos, tx) {
-                // Ya no hay nadie escuchando: la grabacion ha terminado.
+                // Nobody is listening any more: the recording has ended.
                 break;
             }
         }
@@ -310,20 +274,12 @@ fn capturar(
             continue;
         }
 
-        // 2. Y si el maestro se ha callado, manda el reloj de pared: se emite el silencio
-        //    que falta hasta ahora mismo, con la voz del microfono encima.
+        // 2. If the master has gone quiet, the wall clock takes over and the missing time is
+        // written as silence, with the microphone mixed on top.
         //
-        //    El loopback de Windows entrega lo que ESTA SONANDO, y cuando no suena nada no
-        //    entrega nada: ni silencio, ni paquetes. Hasta el 17 de septiembre de 2026 eso
-        //    significaba dos cosas, las dos malas: que un tutorial narrado sin musica de
-        //    fondo salia MUDO (la voz solo se leia encima de los paquetes del altavoz, y no
-        //    habia paquetes), y que cuando por fin sonaba algo el sonido iba por detras de
-        //    la imagen tanto como hubiera durado el silencio, porque el reloj del sonido
-        //    cuenta bytes entregados. Se probo el remedio de OBS (reproducir silencio por el
-        //    altavoz para que el loopback no se calle) y en esta maquina no despierta nada:
-        //    cero paquetes, medido con ceros y con ruido inaudible. Asi que el silencio se
-        //    escribe desde aqui, medido con el reloj de la maquina, que es el mismo que
-        //    llevan los fotogramas.
+        // WASAPI loopback delivers nothing when nothing is playing. Without this, narration
+        // over a silent desktop would be lost and audio would fall behind video by the length
+        // of every silence.
         if !llego_algo {
             let emitido = formato.duracion(escritos);
             if let Some(instantes) = instantes_que_faltan(
@@ -344,9 +300,8 @@ fn capturar(
     Ok(())
 }
 
-/// Manda un trozo con la voz encima y avanza el reloj de lo escrito.
-///
-/// Devuelve `false` cuando ya no hay nadie escuchando: la grabacion ha terminado.
+/// Emit a chunk with the microphone mixed in and advance the written-audio clock. Returns
+/// `false` when nobody is listening any more.
 fn emitir(
     trozo: Vec<u8>,
     formato: Formato,
@@ -354,8 +309,8 @@ fn emitir(
     escritos: &mut usize,
     tx: &SyncSender<Trozo>,
 ) -> bool {
-    // `mezclar_encima` coge del microfono justo lo que dura este trozo; si el microfono va
-    // con retraso, lo que falte se queda en silencio y el sistema se sigue oyendo entero.
+    // `mezclar_encima` takes exactly this chunk's duration from the microphone; if the
+    // microphone lags, the rest is silent and system audio is kept whole.
     let trozo = match mic {
         Some(mic) => mezclar_encima(trozo, formato, mic),
         None => trozo,
@@ -371,11 +326,8 @@ fn emitir(
     }
 }
 
-/// Cuantos instantes de silencio hay que emitir para que lo escrito alcance al reloj.
-///
-/// `None` mientras la diferencia no llegue a `SEQUIA`. Va aparte y sin tocar ningun
-/// aparato para poder probar la cuenta, que es la que decide si el sonido va pegado a la
-/// imagen cuando el altavoz se calla.
+/// How many frames of silence are needed for written audio to catch up with the clock, or
+/// `None` while the gap is below `SEQUIA`. Pure so it can be tested.
 fn instantes_que_faltan(
     reloj: Duration,
     emitido: Duration,
@@ -388,9 +340,7 @@ fn instantes_que_faltan(
     Some((falta.as_nanos() * u128::from(muestras_por_segundo) / 1_000_000_000) as usize)
 }
 
-/// El reloj de pared de la grabacion, descontando lo que haya durado en pausa.
-///
-/// Los instantes entran por parametro para poder probarlo con tiempos inventados.
+/// Wall-clock recording time minus paused time. Instants are parameters so it can be tested.
 struct RelojDeGrabacion {
     arranque: Instant,
     pausado: Duration,
@@ -406,7 +356,7 @@ impl RelojDeGrabacion {
         }
     }
 
-    /// Se le dice en cada vuelta si se esta en pausa; el apunta cuando empieza y acaba.
+    /// Told each iteration whether recording is paused; tracks when pauses start and end.
     fn apuntar_pausa(&mut self, en_pausa: bool, ahora: Instant) {
         match (en_pausa, self.pausa_desde) {
             (true, None) => self.pausa_desde = Some(ahora),
@@ -418,7 +368,7 @@ impl RelojDeGrabacion {
         }
     }
 
-    /// Lo que ha pasado de verdad grabando: sin las pausas cerradas ni la que este abierta.
+    /// Actual recorded time, excluding finished pauses and a pause in progress.
     fn transcurrido(&self, ahora: Instant) -> Duration {
         let en_curso = self
             .pausa_desde
@@ -430,29 +380,26 @@ impl RelojDeGrabacion {
     }
 }
 
-/// El microfono cuando acompanna al sistema, con lo que le sobro de la ultima vuelta.
+/// The microphone when it is mixed with system audio, plus leftover samples from the last
+/// iteration.
 struct Acompannante {
     cliente: IAudioClient,
     captura: IAudioCaptureClient,
     formato: Formato,
-    /// Muestras ya adaptadas al formato del maestro y todavia sin gastar.
+    /// Samples already converted to the master format and not used yet.
     pendiente: Vec<f32>,
 }
 
-/// Suma sobre el trozo del maestro lo que haya llegado del microfono.
-///
-/// El microfono se lee entero cada vez y se guarda en `pendiente`, ya convertido al
-/// formato del maestro. De ahi se gasta exactamente lo que dura este trozo: ni mas, para
-/// no adelantar la voz, ni menos, para no irla acumulando.
+/// Mix microphone samples onto the master chunk. The microphone is drained each time into
+/// `pendiente` (already converted); exactly this chunk's duration is consumed so the voice
+/// neither runs ahead nor accumulates delay.
 fn mezclar_encima(trozo: Vec<u8>, formato: Formato, mic: &mut Acompannante) -> Vec<u8> {
     if let Some(nuevas) = unsafe { leer_todo(&mic.captura, mic.formato) } {
         mic.pendiente
             .extend(super::mezcla::adaptar(&nuevas, mic.formato, formato));
     }
-    // Si el microfono va por delante (su reloj corre un pelin mas rapido que el del
-    // maestro), lo pendiente creceria toda la tarde y la voz llegaria cada vez mas tarde.
-    // Se tira lo mas viejo y se deja medio segundo, que es mas que cualquier retraso
-    // normal entre los dos aparatos. Con el anillo puesto esto corre horas.
+    // If the microphone clock runs slightly fast, the backlog would grow forever and the voice
+    // would drift late. Keep at most half a second, dropping the oldest samples.
     let tope = formato.muestras_por_segundo as usize * usize::from(formato.canales.max(1)) / 2;
     if mic.pendiente.len() > tope {
         let sobra = mic.pendiente.len() - tope;
@@ -468,7 +415,7 @@ fn mezclar_encima(trozo: Vec<u8>, formato: Formato, mic: &mut Acompannante) -> V
     super::mezcla::como_bytes(&muestras)
 }
 
-/// Vacia el bufer de un dispositivo y devuelve sus muestras, o `None` si no habia nada.
+/// Drain a device's buffer and return its samples, or `None` if empty.
 unsafe fn leer_todo(captura: &IAudioCaptureClient, formato: Formato) -> Option<Vec<f32>> {
     let mut todo: Vec<f32> = Vec::new();
     loop {
@@ -492,16 +439,16 @@ unsafe fn leer_todo(captura: &IAudioCaptureClient, formato: Formato) -> Option<V
     (!todo.is_empty()).then_some(todo)
 }
 
-/// Que aparato se abre.
+/// Which device to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Dispositivo {
-    /// Los altavoces, en modo loopback: se graba lo que ESTA SONANDO.
+    /// The speakers in loopback mode: records what is playing.
     Altavoz,
-    /// El microfono, que se graba como cualquier entrada, sin loopback.
+    /// The microphone, recorded as a normal input.
     Microfono,
 }
 
-/// Abre el aparato que se le pida y devuelve con que formato esta trabajando.
+/// Open the requested device and return the format it uses.
 unsafe fn abrir_elegido(
     que: Dispositivo,
     device_id: Option<&str>,
@@ -509,9 +456,8 @@ unsafe fn abrir_elegido(
     let enumerador: IMMDeviceEnumerator =
         CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(|e| AppError::Msg(format!("Could not enumerate audio devices: {e}")))?;
-    // `eRender` es la salida (los altavoces) y `eCapture` la entrada (el microfono).
-    // `eConsole` es el uso normal, no el de comunicaciones: es el que sigue al aparato que
-    // el usuario tiene puesto en Windows.
+    // `eRender` is output (speakers), `eCapture` is input (microphone). `eConsole` follows the
+    // user's default device in Windows.
     let (flujo, nombre) = match que {
         Dispositivo::Altavoz => (eRender, "speaker"),
         Dispositivo::Microfono => (eCapture, "microphone"),
@@ -542,16 +488,15 @@ unsafe fn abrir_elegido(
     let formato_ptr = cliente
         .GetMixFormat()
         .map_err(|e| AppError::Msg(format!("Could not determine the audio format: {e}")))?;
-    // El formato lo reserva Windows y hay que devolverlo, tanto si esto sale bien como si
-    // no: se copia lo que interesa y se suelta en el acto.
+    // Windows allocates the format and it must be freed either way: copy what is needed and
+    // free it immediately.
     let formato = Formato {
         canales: (*formato_ptr).nChannels,
         muestras_por_segundo: (*formato_ptr).nSamplesPerSec,
         bits_por_muestra: (*formato_ptr).wBitsPerSample,
     };
 
-    // El loopback ("dame lo que esta sonando") solo existe para una salida. Pedirselo a
-    // un microfono lo rechaza: una entrada ya se graba de por si.
+    // Loopback only exists for outputs; inputs are recorded directly.
     let banderas = match que {
         Dispositivo::Altavoz => AUDCLNT_STREAMFLAGS_LOOPBACK,
         Dispositivo::Microfono => 0,
@@ -592,17 +537,12 @@ impl Drop for Com {
     }
 }
 
-/// Pasa el sonido de coma flotante a enteros de 16 bits.
-///
-/// El mezclador de Windows entrega el sonido en coma flotante de 32 bits, y el
-/// codificador AAC quiere enteros de 16. Sin esta conversion el MP4 sale con la pista
-/// muda o con un chirrido, que es peor que no tener sonido.
+/// Convert 32-bit float samples (the Windows mixer format) to 16-bit integers for the encoder.
 pub fn a_pcm16(flotantes: &[u8]) -> Vec<u8> {
     let mut salida = Vec::with_capacity(flotantes.len() / 2);
     for muestra in flotantes.chunks_exact(4) {
         let valor = f32::from_le_bytes([muestra[0], muestra[1], muestra[2], muestra[3]]);
-        // Se recorta a [-1, 1] antes de escalar: una muestra por encima de uno daria la
-        // vuelta al convertirla y sonaria como un chasquido.
+        // Clamp to [-1, 1] before scaling; values above 1 would wrap around and click.
         let recortado = valor.clamp(-1.0, 1.0);
         let entero = (recortado * i16::MAX as f32) as i16;
         salida.extend_from_slice(&entero.to_le_bytes());
@@ -610,394 +550,3 @@ pub fn a_pcm16(flotantes: &[u8]) -> Vec<u8> {
     salida
 }
 
-/// El formato que de verdad se le entrega al codificador, ya en enteros de 16 bits.
-pub fn formato_para_el_mp4(origen: Formato) -> Formato {
-    Formato {
-        bits_por_muestra: 16,
-        ..origen
-    }
-}
-
-/// Deja el formato en la estructura que espera Windows para los medios. La necesita el
-/// codificador para saber que le esta entrando.
-pub fn como_waveformat(formato: Formato) -> WAVEFORMATEX {
-    WAVEFORMATEX {
-        wFormatTag: 3, // WAVE_FORMAT_IEEE_FLOAT, que es lo que da el mezclador de Windows
-        nChannels: formato.canales,
-        nSamplesPerSec: formato.muestras_por_segundo,
-        nAvgBytesPerSec: formato.muestras_por_segundo * formato.bytes_por_instante(),
-        nBlockAlign: formato.bytes_por_instante() as u16,
-        wBitsPerSample: formato.bits_por_muestra,
-        cbSize: 0,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Las cuentas del tiempo, que son las que sincronizan el sonido con la imagen. Un
-    /// error aqui no se ve: se OYE, y tarde, cuando alguien reproduce el video.
-    #[test]
-    fn un_segundo_de_sonido_dura_un_segundo() {
-        let formato = Formato {
-            canales: 2,
-            muestras_por_segundo: 48_000,
-            bits_por_muestra: 32,
-        };
-        // Dos canales de cuatro bytes: ocho bytes por instante.
-        assert_eq!(formato.bytes_por_instante(), 8);
-        // Un segundo entero son 48.000 instantes, o sea 384.000 bytes.
-        assert_eq!(formato.duracion_de(384_000), 10_000_000);
-        // Y medio segundo, la mitad.
-        assert_eq!(formato.duracion_de(192_000), 5_000_000);
-        assert_eq!(formato.duracion_de(0), 0);
-    }
-
-    /// El mono a 44.100 tambien tiene que salir bien: no todo el mundo tiene el altavoz
-    /// en estereo a 48 kHz.
-    #[test]
-    fn el_mono_a_cuarenta_y_cuatro_mil_cien_tambien_cuadra() {
-        let formato = Formato {
-            canales: 1,
-            muestras_por_segundo: 44_100,
-            bits_por_muestra: 16,
-        };
-        assert_eq!(formato.bytes_por_instante(), 2);
-        assert_eq!(formato.duracion_de(88_200), 10_000_000);
-    }
-
-    /// El silencio, el maximo y el minimo, que son los tres sitios donde una conversion
-    /// mal hecha se oye: un chasquido en cada extremo.
-    #[test]
-    fn el_sonido_pasa_a_enteros_sin_chasquidos() {
-        let mut bytes = Vec::new();
-        for valor in [0.0f32, 1.0, -1.0, 0.5, 2.0, -3.0] {
-            bytes.extend_from_slice(&valor.to_le_bytes());
-        }
-        let pcm = a_pcm16(&bytes);
-        let leidos: Vec<i16> = pcm
-            .chunks_exact(2)
-            .map(|p| i16::from_le_bytes([p[0], p[1]]))
-            .collect();
-        assert_eq!(leidos[0], 0, "el silencio tiene que quedarse en cero");
-        assert_eq!(leidos[1], i16::MAX, "el máximo se va al tope");
-        assert_eq!(leidos[2], -i16::MAX, "y el mínimo, al otro tope");
-        assert_eq!(leidos[3], i16::MAX / 2, "la mitad, a la mitad");
-        assert_eq!(
-            leidos[4],
-            i16::MAX,
-            "por encima de uno se recorta, no da la vuelta"
-        );
-        assert_eq!(leidos[5], -i16::MAX, "y por debajo de menos uno, igual");
-        assert_eq!(
-            pcm.len(),
-            bytes.len() / 2,
-            "ocupa la mitad, que es el objetivo"
-        );
-    }
-
-    /// Por debajo de la sequia no se rellena nada: eso es jitter, no silencio.
-    #[test]
-    fn por_debajo_de_la_sequia_no_se_rellena() {
-        let emitido = Duration::from_millis(1_000);
-        assert_eq!(
-            instantes_que_faltan(Duration::from_millis(1_050), emitido, 48_000),
-            None
-        );
-        assert_eq!(
-            instantes_que_faltan(Duration::from_millis(1_099), emitido, 48_000),
-            None
-        );
-        // Y si lo escrito va por delante del reloj, tampoco: no hay nada que rellenar.
-        assert_eq!(
-            instantes_que_faltan(Duration::from_millis(900), emitido, 48_000),
-            None
-        );
-    }
-
-    /// Con sequia se rellena JUSTO lo que falta hasta el reloj, ni un instante mas: es lo
-    /// que deja el sonido pegado a la imagen cuando el altavoz vuelve a sonar.
-    #[test]
-    fn con_sequia_se_rellena_justo_lo_que_falta() {
-        let emitido = Duration::from_millis(700);
-        assert_eq!(
-            instantes_que_faltan(Duration::from_millis(1_000), emitido, 48_000),
-            Some(14_400),
-            "300 ms a 48 kHz son 14.400 instantes"
-        );
-        assert_eq!(
-            instantes_que_faltan(Duration::from_millis(800), emitido, 44_100),
-            Some(4_410)
-        );
-    }
-
-    /// El reloj de la grabacion no cuenta las pausas, ni las cerradas ni la que este
-    /// abierta: en pausa la imagen no avanza y el sonido tiene que quedarse con ella.
-    #[test]
-    fn el_reloj_descuenta_las_pausas() {
-        let t0 = Instant::now();
-        let en = |ms: u64| t0 + Duration::from_millis(ms);
-        let mut reloj = RelojDeGrabacion::arrancar(t0);
-        reloj.apuntar_pausa(false, en(500));
-        assert_eq!(reloj.transcurrido(en(500)), Duration::from_millis(500));
-
-        reloj.apuntar_pausa(true, en(1_000));
-        // A mitad de la pausa: lo de antes de pausar, y nada mas.
-        assert_eq!(reloj.transcurrido(en(2_000)), Duration::from_millis(1_000));
-        reloj.apuntar_pausa(true, en(2_500));
-        reloj.apuntar_pausa(false, en(3_000));
-        // Dos segundos de pausa descontados de cuatro de reloj.
-        assert_eq!(reloj.transcurrido(en(4_000)), Duration::from_millis(2_000));
-
-        // Una segunda pausa se suma a la primera.
-        reloj.apuntar_pausa(true, en(4_000));
-        reloj.apuntar_pausa(false, en(4_500));
-        assert_eq!(reloj.transcurrido(en(5_000)), Duration::from_millis(2_500));
-    }
-
-    /// Un segundo de lo escrito dura un segundo tambien como `Duration`.
-    #[test]
-    fn la_duracion_como_duration_cuadra() {
-        let formato = Formato {
-            canales: 2,
-            muestras_por_segundo: 48_000,
-            bits_por_muestra: 32,
-        };
-        assert_eq!(formato.duracion(384_000), Duration::from_secs(1));
-        assert_eq!(formato.duracion(0), Duration::ZERO);
-    }
-
-    /// Con el altavoz CALLADO tiene que seguir llegando sonido (silencio, pero entregado),
-    /// porque es lo que mantiene la pista pegada a la imagen. Antes de rellenar por reloj
-    /// esto daba cero trozos en tres segundos siempre que no hubiera nada sonando.
-    ///
-    /// Va con `--ignored` porque necesita un altavoz:
-    /// `cargo test --lib el_sonido_sigue_llegando -- --ignored --nocapture`
-    #[test]
-    #[ignore = "necesita un altavoz de verdad"]
-    fn el_sonido_sigue_llegando_con_el_altavoz_callado() {
-        let captura = empezar(
-            Fuentes {
-                sistema: true,
-                microfono: false,
-            },
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("no se ha podido abrir el altavoz");
-        let formato = captura.formato;
-        std::thread::sleep(Duration::from_secs(3));
-        let (mut bytes, mut trozos, mut ultimo_inicio) = (0usize, 0u32, 0i64);
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            assert!(
-                trozo.desde_el_inicio >= ultimo_inicio,
-                "el tiempo del sonido va hacia atras"
-            );
-            ultimo_inicio = trozo.desde_el_inicio;
-            bytes += trozo.datos.len();
-            trozos += 1;
-        }
-        captura.parar();
-        let ms = formato.duracion_de(bytes) / 10_000;
-        eprintln!("[altavoz callado] {trozos} trozos, {ms} ms de sonido en 3 s de reloj");
-        assert!(
-            (2_500..=3_300).contains(&ms),
-            "en 3 s tendrian que haber llegado unos 3 s de sonido, y han llegado {ms} ms"
-        );
-    }
-
-    /// Lo mismo con el microfono puesto: es el caso del tutorial narrado sin musica, que
-    /// salia MUDO. Aqui no se puede comprobar que se oiga la voz (nadie habla), pero si
-    /// que los trozos llegan y que la pista dura lo que dura el reloj.
-    ///
-    /// `cargo test --lib la_pista_no_se_queda_muda -- --ignored --nocapture`
-    #[test]
-    #[ignore = "necesita altavoz y microfono de verdad"]
-    fn la_pista_no_se_queda_muda_con_microfono_y_altavoz_callado() {
-        let captura = empezar(
-            Fuentes {
-                sistema: true,
-                microfono: true,
-            },
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("no se ha podido abrir el sonido");
-        let formato = captura.formato;
-        std::thread::sleep(Duration::from_secs(3));
-        let mut bytes = 0usize;
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            bytes += trozo.datos.len();
-        }
-        captura.parar();
-        let ms = formato.duracion_de(bytes) / 10_000;
-        eprintln!("[voz con altavoz callado] {ms} ms de pista en 3 s de reloj");
-        assert!(
-            (2_500..=3_300).contains(&ms),
-            "la pista dura {ms} ms y tenia que durar unos 3 s"
-        );
-    }
-
-    /// Abre el microfono de verdad y comprueba que entrega sonido.
-    ///
-    /// Va con `--ignored` porque necesita un microfono conectado:
-    /// `cargo test --lib escuchar_el_microfono -- --ignored --nocapture`
-    ///
-    /// Lo que comprueba y no se puede saber leyendo el codigo: que una ENTRADA se abre sin
-    /// la bandera de loopback. Con ella puesta, Windows rechaza el dispositivo y el
-    /// microfono no graba nada, sin mas explicacion que un codigo de error.
-    #[test]
-    #[ignore]
-    fn escuchar_el_microfono() {
-        let captura = empezar(
-            Fuentes {
-                sistema: false,
-                microfono: true,
-            },
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("abrir el micrófono");
-        println!(
-            "el micrófono da {} canales a {} Hz y {} bits",
-            captura.formato.canales,
-            captura.formato.muestras_por_segundo,
-            captura.formato.bits_por_muestra
-        );
-        std::thread::sleep(std::time::Duration::from_millis(600));
-
-        let mut trozos = 0;
-        let mut bytes = 0usize;
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            trozos += 1;
-            bytes += trozo.datos.len();
-        }
-        captura.parar();
-        println!(
-            "{trozos} trozos, {bytes} bytes, {:.2} s de sonido",
-            bytes as f64 / (48_000.0 * 8.0)
-        );
-        assert!(trozos > 0, "el micrófono no ha entregado ni un trozo");
-    }
-
-    /// Los dos a la vez, que es el caso de un tutorial narrado.
-    ///
-    /// Comprueba lo unico que aqui puede salir mal de verdad: que el trozo mezclado sigue
-    /// midiendo lo que medía. Si la mezcla alargara o acortara los trozos, el sonido se
-    /// iria desplazando poco a poco y a los dos minutos ya no cuadraria con la imagen.
-    #[test]
-    #[ignore]
-    fn el_sistema_y_el_microfono_a_la_vez_no_cambian_la_duracion() {
-        let captura = empezar(
-            Fuentes {
-                sistema: true,
-                microfono: true,
-            },
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("abrir los dos");
-        let formato = captura.formato;
-        std::thread::sleep(std::time::Duration::from_millis(600));
-
-        let mut bytes = 0usize;
-        let mut ultimo_inicio = 0i64;
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            // Cada trozo empieza justo donde acababa el anterior: la marca de tiempo se
-            // calcula contando bytes, así que si la mezcla cambiara el tamaño, aquí se
-            // vería un salto.
-            assert_eq!(
-                trozo.desde_el_inicio,
-                formato.duracion_de(bytes),
-                "el trozo mezclado no empieza donde acababa el anterior"
-            );
-            assert!(
-                trozo.desde_el_inicio >= ultimo_inicio,
-                "el tiempo va hacia atrás"
-            );
-            ultimo_inicio = trozo.desde_el_inicio;
-            bytes += trozo.datos.len();
-        }
-        captura.parar();
-        println!(
-            "{bytes} bytes mezclados, {:.2} s",
-            bytes as f64 / (48_000.0 * 8.0)
-        );
-        assert!(
-            bytes > 0,
-            "no ha llegado sonido de ninguna de las dos fuentes"
-        );
-    }
-
-    /// La estructura que se le pasa a Windows tiene que ser coherente consigo misma, o el
-    /// codificador la rechaza sin decir por que.
-    #[test]
-    fn el_formato_para_windows_cuadra_consigo_mismo() {
-        let formato = Formato {
-            canales: 2,
-            muestras_por_segundo: 48_000,
-            bits_por_muestra: 32,
-        };
-        let wave = como_waveformat(formato);
-        // `WAVEFORMATEX` viene empaquetada, asi que no se puede coger una referencia a sus
-        // campos: se copian a variables sueltas antes de compararlos.
-        let (canales, bits, alineacion) = (wave.nChannels, wave.wBitsPerSample, wave.nBlockAlign);
-        let (por_segundo, muestras) = (wave.nAvgBytesPerSec, wave.nSamplesPerSec);
-        assert_eq!(
-            u32::from(alineacion),
-            u32::from(canales) * u32::from(bits) / 8
-        );
-        assert_eq!(por_segundo, muestras * u32::from(alineacion));
-    }
-}
-
-#[cfg(test)]
-mod prueba_de_verdad {
-    use super::*;
-
-    /// Abre el altavoz de verdad y comprueba que Windows entrega sonido. No corre sola
-    /// porque necesita una tarjeta de sonido y medio segundo:
-    /// `cargo test --lib escuchar_el_altavoz -- --ignored --nocapture`.
-    ///
-    /// Con el equipo en silencio tambien pasa, pero NO porque el loopback entregue
-    /// silencio: cuando no suena nada no entrega nada, medido el 17 de septiembre de 2026
-    /// (esta misma prueba daba cero trozos con el altavoz callado, y su comentario decia lo
-    /// contrario). Lo que rellena el silencio es `capturar`, con el reloj de la maquina.
-    /// Lo que se comprueba es que el grifo esta abierto, suene algo o no.
-    #[test]
-    #[ignore]
-    fn escuchar_el_altavoz_de_verdad() {
-        let captura = empezar(
-            Fuentes {
-                sistema: true,
-                microfono: false,
-            },
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("no se ha podido abrir el altavoz");
-        println!(
-            "altavoz: {} canales a {} Hz, {} bits",
-            captura.formato.canales,
-            captura.formato.muestras_por_segundo,
-            captura.formato.bits_por_muestra
-        );
-        std::thread::sleep(std::time::Duration::from_millis(600));
-
-        let mut bytes = 0usize;
-        let mut trozos = 0usize;
-        let mut con_sonido = 0usize;
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            bytes += trozo.datos.len();
-            trozos += 1;
-            if trozo.datos.iter().any(|b| *b != 0) {
-                con_sonido += 1;
-            }
-        }
-        let segundos = captura.formato.duracion_de(bytes) as f64 / 10_000_000.0;
-        println!("{trozos} trozos, {bytes} bytes, {segundos:.2} s de sonido, {con_sonido} con algo sonando");
-        captura.parar();
-
-        assert!(trozos > 0, "Windows no ha entregado ni un trozo de sonido");
-        assert!(
-            segundos > 0.3,
-            "en 0,6 s deberían llegar más de 0,3 s de sonido y han llegado {segundos:.2}"
-        );
-    }
-}

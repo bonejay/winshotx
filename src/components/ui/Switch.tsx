@@ -5,7 +5,7 @@ interface Props {
   disabled?: boolean;
 }
 
-/** Interruptor suelto, para usar dentro de una fila que ya tiene su texto. */
+/** A standalone switch for use inside a row that already has its label. */
 export function Switch({ checked, onChange, label, disabled = false }: Props) {
   return (
     <button

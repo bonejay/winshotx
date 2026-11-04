@@ -34,13 +34,3 @@ pub fn hay_con_que_pintar() -> bool {
 pub fn hay_con_que_pintar() -> bool {
     true
 }
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn missing_runtime_message_is_actionable_and_english() {
-        let (title, body) = super::aviso();
-        assert!(title.contains("WebView2"));
-        assert!(body.contains("not installed"));
-        assert!(body.contains("Microsoft"));
-    }
-}

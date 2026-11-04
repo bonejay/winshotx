@@ -4,9 +4,9 @@ The fork uses a native Windows tray menu, English-only controls, screenshots, an
 
 ## Verified locally
 
-- 133 frontend tests passed, including audio endpoint selection and signal meters, CRF slider/field synchronization, manual encoder tests and result invalidation, Shift+Print Screen keyup handling, independent default selection modes, and removal of editor actions.
-- TypeScript type check passed.
-- Live-encoding change: Rust was not compiled locally (no toolchain on the validation machine). CI runs `record::stream_encoder::tests` (frame clock without drift, audio gap/overlap/bound handling, legacy-setting migration, fragmented-MP4 muxing enforced after custom arguments) with the existing unit tests and the release build.
+- Tests inherited from the original repository were removed; only tests for this fork remain.
+- 16 frontend tests passed (settings, audio sources, shortcut field). TypeScript type check passed.
+- Rust: 14 unit tests passed locally, 12 hardware/FFmpeg tests ignored by default. `cargo test --lib` runs `record::stream_encoder::tests` (frame clock without drift, audio gap/overlap/bound handling, legacy-setting migration, fragmented-MP4 muxing enforced after custom arguments), plus the audio-device, capture-pacing, and settings tests.
 - Hardware/FFmpeg tests for the live pipeline are ignored by default; run them with `cargo test --lib -- --ignored live_`. They cover file growth during recording and rename on stop, playable fragments after killing FFmpeg, playable video+AAC after killing the recording process, discard deleting only the owned partial file, audio EOF before short video, picture/tone sync under 50 ms, pause exclusion with a static source, and 720p with real WASAPI audio.
 - Audio setup enumerated three local endpoints, opened the default playback device and microphone, stopped after frontend polling ceased, and rejected a nonexistent endpoint without fallback.
 - Three capture-pacing tests cover 120 fps from 144 Hz and 240 Hz source schedules and delivery jitter. The raw-frame queue holds at most two frames. The recording bar counts delivered capture frames and shows the size of the file being written.

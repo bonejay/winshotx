@@ -1,16 +1,16 @@
 import { useEffect, useRef } from "react";
 import { clamp } from "../../lib/format";
 
-const SIZE = 132; // lado del recuadro en px CSS
-const ZOOM = 6; // cada pixel fisico se pinta como 6x6
+const SIZE = 88; // box size in CSS px
+const ZOOM = 4; // each physical pixel is drawn as 4x4
 
 interface Props {
-  /** Canvas offscreen con el freeze del monitor a resolucion fisica. */
+  /** Offscreen canvas with the monitor's frozen image at physical resolution. */
   source: HTMLCanvasElement | null;
-  /** Punto bajo el cursor, en pixeles fisicos del monitor. */
+  /** Point under the cursor, in the monitor's physical pixels. */
   px: number;
   py: number;
-  /** Esquina del recuadro en coordenadas CSS del overlay. */
+  /** Box corner in overlay CSS coordinates. */
   left: number;
   top: number;
   hex: string;
@@ -25,29 +25,17 @@ export function Magnifier({ source, px, py, left, top, hex }: Props) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const span = Math.floor(SIZE / ZOOM); // pixeles fisicos visibles
+    const span = Math.floor(SIZE / ZOOM); // visible physical pixels
     const half = Math.floor(span / 2);
-    // Pegado a un borde, el recuadro se queda dentro de la imagen en vez de
-    // salirse: si se sale, el navegador recorta origen y destino a la vez y el
-    // pixel que se esta leyendo deja de coincidir con la cruz del centro.
+    // Near an edge the source box stays inside the image; otherwise the browser clips source
+    // and destination together and the sampled pixel no longer matches the crosshair.
     const sx = clamp(Math.round(px) - half, 0, Math.max(0, source.width - span));
     const sy = clamp(Math.round(py) - half, 0, Math.max(0, source.height - span));
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, SIZE, SIZE);
     ctx.drawImage(source, sx, sy, span, span, 0, 0, SIZE, SIZE);
 
-    // Reticula: una cruz sobre el pixel exacto que se esta leyendo.
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= span; i++) {
-      const p = i * ZOOM + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(p, 0);
-      ctx.lineTo(p, SIZE);
-      ctx.moveTo(0, p);
-      ctx.lineTo(SIZE, p);
-      ctx.stroke();
-    }
+    // Outline the exact pixel being sampled.
     ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 2;
     ctx.strokeRect((Math.round(px) - sx) * ZOOM, (Math.round(py) - sy) * ZOOM, ZOOM, ZOOM);
@@ -56,10 +44,10 @@ export function Magnifier({ source, px, py, left, top, hex }: Props) {
   return (
     <div
       style={{ left, top }}
-      className="pointer-events-none absolute z-40 overflow-hidden rounded-xl border border-white/15 bg-neutral-900/90 shadow-2xl backdrop-blur-md"
+      className="pointer-events-none absolute z-40 overflow-hidden rounded-lg border border-white/15 bg-neutral-900/90 shadow-2xl backdrop-blur-md"
     >
       <canvas ref={canvasRef} width={SIZE} height={SIZE} className="block" />
-      <div className="flex items-center justify-between gap-3 border-t border-white/10 px-2 py-1.5 font-mono text-[12px] tabular-nums text-neutral-300">
+      <div className="flex items-center justify-between gap-2 border-t border-white/10 px-1.5 py-1 font-mono text-[10px] tabular-nums text-neutral-300">
         <span>
           {Math.round(px)}, {Math.round(py)}
         </span>
@@ -69,8 +57,7 @@ export function Magnifier({ source, px, py, left, top, hex }: Props) {
             style={{ backgroundColor: hex }}
           />
           {hex}
-          {/* La tecla, al lado del color. Una tecla que no se ve no la usa nadie, y el
-              hueco ya estaba aqui: el color sin forma de llevarselo servia de poco. */}
+          {/* The copy-color key, shown next to the color. */}
           <kbd className="rounded border border-white/15 bg-white/10 px-1 text-[9px] text-neutral-400">
             C
           </kbd>

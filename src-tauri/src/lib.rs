@@ -1,118 +1,54 @@
-pub mod archivos;
+mod archivos;
 mod audio_devices;
-pub mod capture;
+mod capture;
 pub(crate) mod commands;
-pub mod crono;
-pub mod encode;
-pub mod enlaces;
-pub mod error;
+mod encode;
+mod error;
 mod hotkeys;
 mod platform;
-pub mod record;
+mod record;
 mod recorder;
 mod settings;
 mod state;
 mod tray;
 mod windows_mgr;
 
-use std::time::{Duration, SystemTime};
-
 use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::state::AppState;
 
-/// Se lo manda la bandeja a la ventana de ajustes para que mire si hay version nueva.
-pub const EVENT_CHECK_UPDATE: &str = "winshotx://check-update";
-
-/// Y este avisa de que la ventana vuelve a estar a la vista, para refrescar lo que
-/// se haya quedado viejo mientras estaba escondida.
+/// Sent when the settings window becomes visible again, so it can refresh stale state.
 pub const EVENT_SETTINGS_SHOWN: &str = "winshotx://settings-shown";
 
-/// El overlay se reutiliza entre capturas (ver windows_mgr::open_overlays): esto le dice
-/// a una ventana que YA estaba montada que hay una captura nueva que cargar, porque no va
-/// a recibir un remontaje que dispare su arranque solo.
+/// Overlay windows are reused between captures; this tells an already-mounted overlay to load a
+/// new capture.
 pub const EVENT_OVERLAY_SHOW: &str = "winshotx://overlay-show";
 
-/// Cuantos segundos le quedan al temporizador. Lo recibe la ventanita de la cuenta atras,
-/// que a partir de ahi baja sola de segundo en segundo: Rust solo dice el numero de
-/// partida y avisa con un cero cuando se acabo.
+/// Seconds left on the capture delay. The countdown window counts down by itself; Rust sends
+/// the start value and 0 when done.
 pub const EVENT_COUNTDOWN: &str = "winshotx://countdown";
 
-/// El menú de la bandeja se acaba de abrir: que vuelva a leer el estado.
+/// The tray menu was opened: refresh its state.
 pub const EVENT_TRAY_MENU_OPENED: &str = "winshotx://tray-menu-opened";
 
-/// El numero de una pantalla, ensennado en esa pantalla un par de segundos.
-///
-/// Lo usa el ajuste que elige que pantalla vigila el anillo: «la 2» no dice nada si no se
-/// sabe cual es la 2. Comparte ventana con la cuenta atras, y un cero la apaga.
-pub const EVENT_SCREEN_NUMBER: &str = "winshotx://screen-number";
-
-/// Las capturas ancladas viven en ventanas, y las ventanas no sobreviven a cerrar la app.
-///
-/// Sus PNG si sobrevivirian, uno por cada vez que alguien ancla algo, hasta llenar el
-/// disco de recortes que ya nadie puede volver a ver. Se vacia la carpeta entera al
-/// arrancar, que es el unico momento en el que se sabe seguro que ninguno esta en uso.
-fn purge_pins(root: &std::path::Path) {
-    let _ = std::fs::remove_dir_all(root.join("pins"));
-}
-
-/// Y lo que dejo el anillo de los ultimos segundos, que puede ser mucho.
-///
-/// Se borra al arrancar y no al salir a proposito: si la app se cierra a lo bruto o se
-/// cuelga, nadie llega a limpiar, y ahi dentro hay cientos de megabytes que ya no sirven
-/// para nada. El arranque es el unico momento en el que se sabe que no los usa nadie.
-fn purge_replay(root: &std::path::Path) {
-    let _ = std::fs::remove_dir_all(root.join("replay"));
-}
-
-/// Las sesiones son cache: si llevan un dia en el disco, ya no le importan a nadie.
-fn purge_old_sessions(root: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(root.join("sessions")) else {
-        return;
-    };
-    let limit = Duration::from_secs(60 * 60 * 24);
-    for entry in entries.flatten() {
-        let stale = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .map(|modified| {
-                SystemTime::now()
-                    .duration_since(modified)
-                    .unwrap_or_default()
-                    > limit
-            })
-            .unwrap_or(false);
-        if stale && !entry.path().join("keep-on-error").exists() {
-            let _ = std::fs::remove_dir_all(entry.path());
-        }
-    }
-}
-
 pub fn run() {
-    // Antes que nada, y antes de crear una sola ventana: sin WebView2 la ventana se abriria
-    // igual y dentro saldria la pagina de error del navegador, que no dice ni que ha pasado
-    // ni que hacer. Es por lo que la Microsoft Store rechazo el envio el 1 de septiembre de
-    // 2026 («Unusable Feature: Display error page at launch»). Ver `platform::webview`.
+    // Without WebView2 the windows would only show a browser error page, so check before
+    // creating any window. See `platform::webview`.
     if !platform::webview::hay_con_que_pintar() {
         return;
     }
-    // El cronometro del camino del atajo, solo si se pide: ver `crono`.
-    if std::env::args().any(|arg| arg == "--crono") {
-        crono::activar();
-    }
 
     tauri::Builder::default()
-        // Tiene que ir la primera: si ya hay un winshotx vivo, esta instancia se
-        // cierra y le pasa el testigo, en vez de robarle los atajos globales.
+        // Must be the first plugin: a second instance exits and hands over instead of stealing
+        // the global shortcuts.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // Una segunda instancia con `--capture` es la forma de disparar una captura
-            // desde fuera (un guion, otra herramienta, el cronometro), y `--cancel` la
-            // cierra. Sin argumentos, lo de siempre: ensennar los ajustes.
+            // A second instance with `--capture` starts a capture, `--cancel` closes it, and no
+            // arguments shows the settings.
             if args.iter().any(|arg| arg == "--capture") {
                 if let Err(error) =
                     windows_mgr::open_overlays(app, windows_mgr::OverlayIntent::Capture)
                 {
-                    eprintln!("no se ha podido abrir el overlay: {error}");
+                    eprintln!("could not open the overlay: {error}");
                 }
                 return;
             }
@@ -122,7 +58,6 @@ pub fn run() {
             }
             let _ = windows_mgr::show_settings(app);
         }))
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -148,78 +83,24 @@ pub fn run() {
                 }
             }
 
-            // Actualizar desde los propios ajustes acaba en `relaunch()`, y winshotx vuelve
-            // a arrancar en la bandeja: la version nueva entra pero no se ve nada, ni
-            // siquiera que ha pasado algo. Si la version guardada no es la de ahora, este
-            // arranque viene de una actualizacion, y da igual por donde haya entrado
-            // (los ajustes, winget o reinstalar a mano).
-            //
-            // `onboarded` separa actualizar de estrenar: recien instalada la ventana ya se
-            // abre sola con la bienvenida, y ahi no hay ninguna novedad que anunciar.
-            let version = handle.package_info().version.to_string();
-            let recien_actualizado = settings::viene_de_actualizar(
-                config.last_version.as_deref(),
-                &version,
-                config.onboarded,
-            );
-            if config.last_version.as_deref() != Some(version.as_str()) {
-                config.last_version = Some(version);
-                let _ = settings::save(&handle, &config);
-            }
-
             let temp_root = std::env::temp_dir().join("winshotx-english");
-            std::fs::create_dir_all(temp_root.join("sessions"))?;
-            purge_old_sessions(&temp_root);
-            purge_pins(&temp_root);
-            purge_replay(&temp_root);
+            // Older builds kept frame caches and replay rings here.
+            let _ = std::fs::remove_dir_all(temp_root.join("sessions"));
+            let _ = std::fs::remove_dir_all(temp_root.join("replay"));
+            let _ = std::fs::remove_dir_all(temp_root.join("pins"));
 
-            app.manage(AppState::new(config.clone(), temp_root, recien_actualizado));
-
-            // Si el usuario nos dio la tecla Impr Pant hay que comprobarlo en cada
-            // arranque: una actualizacion de Windows o un paseo por Configuracion se la
-            // devuelven a la Herramienta de Recortes sin avisar, y entonces el atajo se
-            // registra igual pero no llega ni una pulsacion.
-            #[cfg(windows)]
-            if config.print_screen_capture {
-                let _ = platform::snipping::write(0);
-            }
-
-            // Y la S fuera de los atajos del escritorio, solo si se pidio esa opcion
-            // aparte: es la que cuesta perder Win+S.
-            #[cfg(windows)]
-            if config.take_win_shift_s {
-                let actuales = platform::snipping::read_disabled_hotkeys().unwrap_or_default();
-                if !actuales.to_uppercase().contains('S') {
-                    let _ =
-                        platform::snipping::write_disabled_hotkeys(Some(&format!("{actuales}S")));
-                }
-            }
+            app.manage(AppState::new(config.clone()));
 
             hotkeys::register(&handle, &config);
             tray::build(&handle)?;
 
-            // Si arranca sola con Windows, que arranque ESTA y no otra copia. Munir tenia
-            // el registro apuntando a una instalacion de hace una semana en otra carpeta:
-            // encendia el ordenador, le arrancaba la version vieja y le pedia actualizar,
-            // todos los dias. Ver `autostart::revisar_ruta`.
-            #[cfg(windows)]
-            if config.start_with_windows {
-                platform::autostart::revisar_ruta();
-            }
-
             // Precreate capture windows hidden; only an explicit capture may show them.
             windows_mgr::precrear_overlays(&handle);
-            // Y lo mismo con la tarjeta grafica de las fotos: crear su dispositivo cuesta
-            // unos 100 ms, y sin esto los pagaria el primer atajo del dia.
+            // Create the GPU capture device up front (~100 ms) so the first shortcut does not
+            // pay for it.
             std::thread::spawn(capture::preparar);
 
-            // La primera vez se abre sola con la bienvenida: recien instalada, la app
-            // vive en la bandeja y sin esto no habria nada que mirar. Y al actualizar
-            // igual, que es el mismo problema: si no, se reinicia y no se ve nada.
-            if !config.onboarded
-                || recien_actualizado
-                || std::env::args().any(|arg| arg == "--settings")
-            {
+            if std::env::args().any(|arg| arg == "--settings") {
                 windows_mgr::show_settings(&handle)?;
             }
             Ok(())
@@ -228,7 +109,7 @@ pub fn run() {
             if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
                 audio_devices::stop(None);
             }
-            // Cerrar los ajustes no cierra la app: sigue viva en la bandeja.
+            // Closing the settings window keeps the app running in the tray.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
@@ -244,19 +125,11 @@ pub fn run() {
             commands::capture_still,
             commands::capture_all_screens,
             commands::cancel_capture,
-            commands::captura_moderna,
-            commands::crono_marca,
             commands::copy_color,
-            commands::copy_pinned,
-            commands::save_pinned,
-            commands::pinned_text,
             commands::start_recording,
             commands::stop_recording,
             commands::pause_recording,
             commands::cancel_recording,
-            commands::ultimas_capturas,
-            commands::copiar_captura,
-            commands::ffmpeg_available,
             commands::ffmpeg_info,
             commands::test_encoder,
             commands::list_audio_devices,
@@ -265,33 +138,19 @@ pub fn run() {
             commands::stop_audio_preview,
             commands::get_settings,
             commands::set_settings,
-            commands::set_capture_flow,
+            commands::apply_preset,
+            commands::ffmpeg_command,
             commands::open_settings,
             commands::pick_directory,
-            commands::reveal_in_explorer,
-            commands::just_updated,
-            commands::is_store_build,
-            commands::cache_stats,
-            commands::clear_cache,
             commands::shortcut_status,
-            commands::list_screens,
-            commands::show_screen_number,
-            commands::print_screen_state,
-            commands::use_print_screen,
-            commands::use_win_shift_s,
-            commands::restart_shell,
             commands::open_folder,
-            commands::open_url,
-            commands::open_windows_apps,
-            commands::remove_snipping_tool,
-            commands::quit_app,
             commands::tray_menu_action,
         ])
         .build(tauri::generate_context!())
-        .expect("no se ha podido construir la aplicacion")
+        .expect("could not build the application")
         .run(|_app, event| {
             if let RunEvent::ExitRequested { api, code, .. } = event {
-                // Sin ventanas abiertas la app sigue en la bandeja, salvo que se pida salir.
+                // With no windows open the app stays in the tray unless an exit was requested.
                 if code.is_none() {
                     api.prevent_exit();
                 }

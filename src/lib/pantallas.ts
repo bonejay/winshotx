@@ -1,33 +1,23 @@
 /**
- * Ir y venir entre las coordenadas de una pantalla y las del escritorio virtual.
+ * Conversions between a screen's coordinates and the virtual desktop.
  *
- * Windows coloca los monitores en un unico plano: el principal empieza en (0, 0) y los
- * demas se cuelgan alrededor. **El que esta a la izquierda o encima del principal tiene
- * coordenadas NEGATIVAS**, y esa es la trampa que ya ha mordido tres veces en este
- * proyecto: recortar a cero (`Math.max(0, x)`) no protege de nada, manda la region a la
- * pantalla equivocada.
+ * Windows places monitors on one plane: the primary starts at (0, 0) and monitors left of or
+ * above it have NEGATIVE coordinates, so clamping to zero (`Math.max(0, x)`) moves a region to
+ * the wrong screen.
  *
- * Vive aparte del componente, y no dentro de un `useMemo`, por una razon: dentro no se
- * puede probar sin montar media aplicacion. Aqui son cuatro funciones sin estado que se
- * comprueban con numeros, incluidos los negativos.
- *
- * Y hay dos unidades distintas en juego:
- * - **Fisicas**: las que usan Rust y el escritorio virtual. Son los pixeles de verdad.
- * - **CSS**: las que ve el navegador de dentro de la ventana, ya divididas por el zoom
- *   que Windows le aplica a esa pantalla.
- *
- * La `escala` es el puente: cuantos pixeles fisicos vale un pixel CSS.
+ * Two units are involved:
+ * - Physical: used by Rust and the virtual desktop; real pixels.
+ * - CSS: what the webview sees, divided by the screen's display scale.
+ * The `escala` (scale) is physical pixels per CSS pixel.
  */
 import type { MonitorInfo, Rect } from "./types";
 
-/** El origen de un monitor. Se pide asi para poder probar sin inventarse un monitor entero. */
+/** A monitor's origin, taken separately so tests do not need a full monitor. */
 export type Origen = Pick<MonitorInfo, "x" | "y" | "width" | "height">;
 
 /**
- * De coordenadas CSS de esta pantalla a fisicas del escritorio virtual.
- *
- * El ancho y el alto nunca bajan de dos pixeles: un recorte de un pixel no es una captura,
- * es un resbalon del raton, y aguas abajo hay codificadores que no aceptan un lado de cero.
+ * From this screen's CSS coordinates to virtual-desktop physical pixels. Width and height are
+ * at least two pixels: a one-pixel selection is a slip, and encoders reject zero sizes.
  */
 export function aVirtual(rect: Rect, monitor: Origen, escala: number): Rect {
   return {
@@ -38,7 +28,7 @@ export function aVirtual(rect: Rect, monitor: Origen, escala: number): Rect {
   };
 }
 
-/** La vuelta: de fisicas del escritorio virtual a CSS de esta pantalla. */
+/** The reverse: from virtual-desktop physical pixels to this screen's CSS coordinates. */
 export function aPantalla(rect: Rect, monitor: Origen, escala: number): Rect {
   return {
     x: (rect.x - monitor.x) / escala,
@@ -49,13 +39,9 @@ export function aPantalla(rect: Rect, monitor: Origen, escala: number): Rect {
 }
 
 /**
- * Si una region del escritorio virtual es de esta pantalla, mirando su CENTRO.
- *
- * Por el centro y no por la esquina porque una region puede pisar dos monitores, y
- * entonces las dos pantallas la reclamarian o ninguna la querria. Rust decide igual al
- * elegir de que pantalla recorta, y las dos mitades tienen que estar de acuerdo: si aqui
- * se decidiera de otra forma, el fantasma de la ultima captura saldria en una pantalla y
- * la foto se cogeria de otra.
+ * Whether a virtual-desktop region belongs to this screen, judged by its CENTER, so a region
+ * spanning two monitors belongs to exactly one. Rust uses the same rule when choosing which
+ * screen to crop from.
  */
 export function esDeEstaPantalla(rect: Rect, monitor: Origen): boolean {
   const cx = rect.x + Math.floor(rect.width / 2);
@@ -68,20 +54,17 @@ export function esDeEstaPantalla(rect: Rect, monitor: Origen): boolean {
   );
 }
 
-/** Una ventana del sistema, tal y como la manda Rust. */
+/** A system window as sent by Rust. */
 export interface VentanaDelSistema {
   title: string;
   rect: Rect;
-  /** Su identificador en Windows, para poder grabarla a ella y no al hueco donde está. */
+  /** Its HWND, so the window itself can be recorded. */
   hwnd: number;
 }
 
 /**
- * Las ventanas del sistema que se ven en esta pantalla, ya en coordenadas CSS.
- *
- * Se quedan fuera las que no asoman por aqui y las mas pequennas que ocho pixeles: a ese
- * tamanno no hay nada que ajustar, y ademas Windows tiene ventanas invisibles de uno o
- * dos pixeles que ensuciarian el ajuste automatico.
+ * System windows visible on this screen, in CSS coordinates. Windows not on this screen and
+ * those smaller than eight pixels (often invisible system windows) are skipped.
  */
 export function ventanasDeEstaPantalla(
   ventanas: VentanaDelSistema[],
@@ -104,12 +87,8 @@ export function ventanasDeEstaPantalla(
 }
 
 /**
- * La ventana que esta encima de las demas bajo un punto.
- *
- * Rust las manda en el orden de `EnumWindows`, que es el orden Z: la primera es la de
- * delante. Antes se cogia la mas pequenna, y eso fallaba en cuanto una ventanita quedaba
- * DETRAS de otra grande (un dialogo tapado por el navegador maximizado): se resaltaba un
- * cuadro que no se veia.
+ * The topmost window under a point. Rust sends windows in `EnumWindows` order (Z order, front
+ * first), so the first match is the visible one.
  */
 export function ventanaBajoElPunto(
   ventanas: VentanaDelSistema[],

@@ -1,4 +1,4 @@
-// Sin consola detras de la ventana en las compilaciones de release.
+// No console window behind the app in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {

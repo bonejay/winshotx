@@ -8,8 +8,11 @@ import { IconButton } from "../ui/IconButton";
 import { useT } from "../../lib/i18n";
 
 
-/** Cuanto se queda armado el boton de descartar esperando el segundo clic. */
+/** How long the discard button stays armed waiting for the second click. */
 export const DESCARTAR_ARMADO_MS = 4_000;
+
+/** Window for the frame rate shown in the bar. */
+const ROLLING_FPS_MS = 2_000;
 
 const SIN_TICK: RecordingTick = {
   elapsedMs: 0,
@@ -23,29 +26,37 @@ const SIN_TICK: RecordingTick = {
 };
 
 /**
- * La barra que acompanna a la grabacion: que se esta grabando, cuanto lleva, y los tres
- * botones. Pausar, parar y descartar.
+ * The recording toolbar: what is being recorded, elapsed time, file size, and pause / stop /
+ * discard.
  *
- * **Descartar pide dos clics.** Un solo Escape, o un clic despistado en la papelera,
- * tiraba diez minutos de grabacion sin preguntar nada. Ahora el primer clic arma el
- * boton (se pone rojo y dice «¿Descartar?») y el segundo, dentro de cuatro segundos, es
- * el que tira. Escape hace lo mismo: uno arma, dos descartan.
+ * Discard needs two clicks (or two Escapes) within four seconds, so a stray click cannot throw
+ * away a recording.
  *
- * **«Guardando…» se queda puesto.** El ultimo tick que manda Rust llega con `saving`, y
- * a partir de ahi la barra no vuelve atras aunque le llegue un tick viejo por el camino:
- * la grabacion ya esta parada y lo unico que va a pasar es que la barra se cierre.
+ * Once a tick with `saving` arrives the bar stays in the saving state, even if an older tick
+ * arrives afterwards.
  */
 export function RecorderBar() {
   const t = useT();
   const [tick, setTick] = useState<RecordingTick>(SIN_TICK);
   const [guardando, setGuardando] = useState(false);
-  /** Lo que se le ha pedido a Rust, sin esperar al siguiente tick para pintarlo. */
+  /** What was requested from Rust, shown before the next tick confirms it. */
   const [pausa, setPausa] = useState(false);
   const [armado, setArmado] = useState(false);
   const desarmar = useRef<number | null>(null);
+  /** Recent (elapsedMs, frames) samples for the rolling frame rate. */
+  const muestras = useRef<{ ms: number; frames: number }[]>([]);
+  const [fps, setFps] = useState<number | null>(null);
 
   useEffect(() => {
     const unlisten = listen<RecordingTick>(EVENTS.recordingTick, (e) => {
+      const { elapsedMs, frames } = e.payload;
+      // Rate over the last ~2 seconds of recorded time. Paused time does not advance
+      // `elapsedMs`, so the window simply waits while paused.
+      const lista = muestras.current;
+      if (!lista.length || elapsedMs > lista[lista.length - 1].ms) lista.push({ ms: elapsedMs, frames });
+      while (lista.length > 2 && elapsedMs - lista[1].ms >= ROLLING_FPS_MS) lista.shift();
+      const primera = lista[0];
+      if (elapsedMs - primera.ms >= 500) setFps(Math.round((frames - primera.frames) * 1000 / (elapsedMs - primera.ms)));
       setTick(e.payload);
       setPausa(e.payload.paused);
       if (e.payload.saving) setGuardando(true);
@@ -68,7 +79,7 @@ export function RecorderBar() {
     void pauseRecording(siguiente).catch(() => setPausa(!siguiente));
   }, [guardando, pausa]);
 
-  /** Primer toque: se arma. Segundo toque, dentro del plazo: se tira la grabacion. */
+  /** First press arms; a second press within the timeout discards the recording. */
   const descartar = useCallback(() => {
     if (guardando) return;
     if (armado) {
@@ -128,7 +139,7 @@ export function RecorderBar() {
         </span>
       </span>
 
-      {/* Que se esta grabando: el formato, y el sonido solo si entra de verdad. */}
+      {/* What is being recorded, and audio only if it is really captured. */}
       {guardando ? (
         <span className="text-[13px] leading-none text-neutral-400">{t("Saving…")}</span>
       ) : pausa ? (
@@ -151,7 +162,7 @@ export function RecorderBar() {
               <Mic className="size-3.5 text-neutral-400" aria-hidden="true" />
             </span>
           )}
-          {/* El tamanno solo cuando importa: por encima del aviso, en ambar. */}
+          {/* Size of the file being written. */}
           {tick.bytes > 0 && (
             <span
               title={tick.outputPath ?? "Written to the recording file"}
@@ -163,7 +174,7 @@ export function RecorderBar() {
         </span>
       )}
 
-      {!guardando && tick.elapsedMs >= 500 && <span className="text-[13px] tabular-nums text-neutral-400" title="Average captured frame rate">{Math.round(tick.frames * 1000 / tick.elapsedMs)} fps</span>}
+      {!guardando && fps !== null && <span className="text-[13px] tabular-nums text-neutral-400" title="New frames captured per second over the last 2 seconds. A still screen produces fewer; the video file always uses the target frame rate.">{fps} fps</span>}
       <span className="ml-auto flex items-center gap-1">
         <IconButton
           icon={pausa ? Play : Pause}
