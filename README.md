@@ -33,11 +33,11 @@ Change shortcuts in Settings by clicking a shortcut and pressing a combination, 
 
 ## Encoding
 
-Windows Media Foundation H.264 works without extra installation. Capture targets are 15, 24, 25, 30, 50, 60, 90, or 120 fps. Built-in video quality ranges from 10 to 100, with optional target bitrate in Mbps.
+Recording requires FFmpeg. Capture targets are 15, 24, 25, 30, 50, 60, 90, or 120 fps.
 
-For additional encoders, choose **Settings → Recording → Encoding engine → FFmpeg** and enter the full executable path, or use `ffmpeg` for PATH lookup. SVP 4's bundled executable is detected automatically when present. The app checks the selected executable and lists the encoders in that build; encoders not compiled into it are disabled in the selector.
+In **Settings → Recording → Encoding**, enter the full path to `ffmpeg.exe`, or use `ffmpeg` for PATH lookup. SVP 4's bundled executable is detected automatically when present. The app checks the selected executable and lists the encoders in that build; encoders not compiled into it are disabled in the selector.
 
-**Use balanced settings** selects H.264/x264, the `medium` preset, and constant-quality CRF 20. Lower values increase quality and file size. NVENC uses CQ, Quick Sync uses global quality, and AMF uses QP. A separate target-bitrate mode is available. The CRF/CQ slider and numeric field stay synchronized. The separate percentage control is shown only for built-in encoding.
+**Use balanced settings** selects H.264/x264, the `veryfast` preset, and constant-quality CRF 20. Lower values increase quality and file size. NVENC uses CQ, Quick Sync uses global quality, and AMF uses QP. A separate target-bitrate mode is available. The CRF/CQ slider and numeric field stay synchronized. Settings saved by older builds with the removed built-in engine are migrated to x264 `veryfast`.
 
 | Encoder | Hardware |
 | --- | --- |
@@ -49,13 +49,15 @@ For additional encoders, choose **Settings → Recording → Encoding engine →
 
 Encoder support depends on your FFmpeg build, GPU, and driver. NVIDIA device indices start at 0; blank means automatic selection. Other hardware encoders select their default device, with further options available through advanced arguments.
 
-FFmpeg options apply to the **saved MP4**. Capture uses a lossless frame cache and separate PCM audio; on stop, Media Foundation creates a high-bitrate H.264 intermediate and FFmpeg transcodes it with the selected options. Built-in encoding writes H.264 during recording with a cache fallback. FFmpeg output is not a raw or lossless pipeline.
+Recordings are encoded live. Raw BGRA frames and 16-bit PCM audio are streamed to FFmpeg over loopback sockets; no frame cache or intermediate file is written. FFmpeg writes a fragmented MP4 (`empty_moov`, about one fragment per second) straight into the save folder as `<name>.recording.mp4`. Stopping finalizes the file and renames it to `<name>.mp4`. If the app or FFmpeg is interrupted, the `.recording.mp4` file stays in the save folder and plays up to the last completed fragment. Discarding a recording deletes only its own partial file.
+
+Video and audio share one clock that excludes paused time. A static source repeats its last frame at the output rate. If the encoder falls more than two seconds behind, recording stops with an error and the fragments written so far are kept; choose a faster preset, a hardware encoder, or a lower frame rate.
 
 Use **Test encoder** to encode a half-second generated 1280 × 720 picture and tone at the selected frame rate. It checks the actual encoder, preset, quality, device index, and advanced arguments without reading your screen or audio devices. Results clear when relevant settings change. Tests time out after 20 seconds. Passing checks compatibility; it does not promise sustained full-resolution capture performance.
 
 120 fps is a target, not a guarantee of 120 distinct source frames per second. Windows Graphics Capture delivers frames according to source/compositor updates and system performance; see the [capture backend's frame-update behavior](https://docs.rs/windows-capture/latest/windows_capture/settings/enum.MinimumUpdateIntervalSettings.html). The recording bar reports measured capture fps. Cadence tests cover 144 Hz and 240 Hz sources, and a bounded raw-frame queue prevents an encoder or disk backlog from consuming unbounded memory.
 
-The preset field takes an FFmpeg encoder preset name. Defaults are `medium` for x264/x265/Quick Sync, `p4` for NVENC, and the encoder default for AMF/software AV1.
+The preset field takes an FFmpeg encoder preset name. Use a fast preset for live recording. Defaults are `veryfast` for x264/x265/Quick Sync, `p4` for NVENC, and the encoder default for AMF/software AV1.
 
 Advanced output arguments are a JSON array of strings, for example:
 
@@ -69,7 +71,7 @@ To override quality explicitly:
 ["-crf", "18", "-preset", "slow"]
 ```
 
-Arguments are passed directly to FFmpeg without a shell, after generated codec options and before the managed destination path. They can override encoding options; input selection, audio selection, and output naming remain managed by the app. For a completely independent command, export a video and run FFmpeg yourself, for example:
+Arguments are passed directly to FFmpeg without a shell, after generated codec options and before the managed destination path. They can override codec options; inputs, audio selection, output naming, and the fragmented-MP4 muxing flags remain managed by the app and are always applied last. To re-encode a finished recording, run FFmpeg yourself, for example:
 
 ```powershell
 ffmpeg -i "capture.mp4" -c:v libx265 -crf 18 -preset slow -c:a copy "output.mp4"

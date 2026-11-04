@@ -74,14 +74,14 @@ fn default_ffmpeg_path() -> String {
 impl Default for EncodingSettings {
     fn default() -> Self {
         Self {
-            engine: "native".into(),
+            engine: "ffmpeg".into(),
             ffmpeg_path: default_ffmpeg_path(),
             rate_control: "crf".into(),
             crf: 20,
             encoder: "libx264".into(),
             quality: 85,
             bitrate_mbps: 0.0,
-            preset: "medium".into(),
+            preset: "veryfast".into(),
             gpu: String::new(),
             extra_args: "[]".into(),
         }
@@ -300,6 +300,7 @@ pub fn load(app: &AppHandle) -> Settings {
     if !decidido {
         settings.onboarded = true;
     }
+    settings.encoding = crate::record::stream_encoder::streaming_options(&settings.encoding);
     settings.language = Language::En;
     settings.replay_enabled = false;
     settings.onboarded = true;

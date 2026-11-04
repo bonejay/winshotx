@@ -10,7 +10,7 @@
 #![cfg(windows)]
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -80,6 +80,7 @@ pub struct Captura {
     parar: Arc<AtomicBool>,
     hilo: Option<std::thread::JoinHandle<()>>,
     pub formato: Formato,
+    pub started: Instant,
     pub trozos: Receiver<Trozo>,
 }
 
@@ -136,8 +137,8 @@ pub fn empezar_con_dispositivos(
     system_device: Option<String>,
     microphone_device: Option<String>,
 ) -> Result<Captura> {
-    let (formato_tx, formato_rx) = mpsc::channel::<Result<Formato>>();
-    let (tx, rx) = mpsc::channel::<Trozo>();
+    let (formato_tx, formato_rx) = mpsc::channel::<Result<(Formato, Instant)>>();
+    let (tx, rx) = mpsc::sync_channel::<Trozo>(100);
     let parar = Arc::new(AtomicBool::new(false));
     let bandera = Arc::clone(&parar);
 
@@ -160,7 +161,7 @@ pub fn empezar_con_dispositivos(
         }
     });
 
-    let formato = formato_rx
+    let (formato, started) = formato_rx
         .recv()
         .map_err(|_| AppError::Msg("Could not start audio capture".into()))??;
 
@@ -169,13 +170,14 @@ pub fn empezar_con_dispositivos(
         hilo: Some(hilo),
         formato,
         trozos: rx,
+        started,
     })
 }
 
 fn capturar(
     fuentes: Fuentes,
-    formato_tx: &Sender<Result<Formato>>,
-    tx: &Sender<Trozo>,
+    formato_tx: &Sender<Result<(Formato, Instant)>>,
+    tx: &SyncSender<Trozo>,
     parar: &AtomicBool,
     pausa: &AtomicBool,
     system_device: Option<&str>,
@@ -238,7 +240,8 @@ fn capturar(
 
     unsafe { cliente.Start() }.map_err(|e| AppError::Msg(format!("Could not start audio: {e}")))?;
 
-    if formato_tx.send(Ok(formato)).is_err() {
+    let started = Instant::now();
+    if formato_tx.send(Ok((formato, started))).is_err() {
         let _ = unsafe { cliente.Stop() };
         if let Some(microphone) = acompannante.as_ref() {
             let _ = unsafe { microphone.cliente.Stop() };
@@ -248,7 +251,7 @@ fn capturar(
 
     // El reloj de pared de la grabacion, descontando las pausas. Es el que manda cuando el
     // maestro se calla: ver `SEQUIA`.
-    let mut reloj = RelojDeGrabacion::arrancar(Instant::now());
+    let mut reloj = RelojDeGrabacion::arrancar(started);
     let mut escritos: usize = 0;
     while !parar.load(Ordering::Relaxed) {
         std::thread::sleep(CADA);
@@ -349,7 +352,7 @@ fn emitir(
     formato: Formato,
     mic: Option<&mut Acompannante>,
     escritos: &mut usize,
-    tx: &Sender<Trozo>,
+    tx: &SyncSender<Trozo>,
 ) -> bool {
     // `mezclar_encima` coge del microfono justo lo que dura este trozo; si el microfono va
     // con retraso, lo que falte se queda en silencio y el sistema se sigue oyendo entero.
@@ -359,11 +362,13 @@ fn emitir(
     };
     let desde_el_inicio = formato.duracion_de(*escritos);
     *escritos += trozo.len();
-    tx.send(Trozo {
+    match tx.try_send(Trozo {
         datos: trozo,
         desde_el_inicio,
-    })
-    .is_ok()
+    }) {
+        Ok(()) | Err(TrySendError::Full(_)) => true,
+        Err(TrySendError::Disconnected(_)) => false,
+    }
 }
 
 /// Cuantos instantes de silencio hay que emitir para que lo escrito alcance al reloj.

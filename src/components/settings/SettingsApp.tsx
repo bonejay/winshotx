@@ -8,8 +8,8 @@ import { ShortcutField } from "./ShortcutField";
 import { AudioSettings } from "./AudioSettings";
 
 export const DEFAULT_ENCODING: EncodingSettings = {
-  engine: "native", encoder: "libx264", quality: 85, bitrateMbps: 0,
-  preset: "medium", gpu: "", extraArgs: "[]", ffmpegPath: "ffmpeg", rateControl: "crf", crf: 20,
+  engine: "ffmpeg", encoder: "libx264", quality: 85, bitrateMbps: 0,
+  preset: "veryfast", gpu: "", extraArgs: "[]", ffmpegPath: "ffmpeg", rateControl: "crf", crf: 20,
 };
 const ENCODERS = [
   ["libx264", "H.264 · CPU (x264)"], ["libx265", "HEVC · CPU (x265)"],
@@ -82,7 +82,7 @@ export function SettingsApp(_props: { onVerBienvenida?: () => void; arrancarTour
     patch({ encoding: { ...DEFAULT_ENCODING, ...latest.current?.encoding, ...change } });
   }
   if (!settings) return <div className="settings-shell"><p role="status">{error || "Loading settings…"}</p></div>;
-  const enc = { ...DEFAULT_ENCODING, ...settings.encoding };
+  const enc = { ...DEFAULT_ENCODING, ...settings.encoding, engine: "ffmpeg" as const };
   return <div className="settings-shell">
     <aside className="settings-sidebar">
       <div className="settings-brand"><Camera size={24} /><div>WinShotX</div></div>
@@ -117,27 +117,26 @@ export function SettingsApp(_props: { onVerBienvenida?: () => void; arrancarTour
           {settings.fps > 60 && <p className="settings-note">{settings.fps} fps is a target. The source refresh rate, Windows compositor, encoder, and disk speed can limit the actual rate. The recording bar shows measured capture fps.</p>}
         </Card>
         <Card title="Audio sources" detail="Choose the devices to record and check their signal first."><AudioSettings settings={settings} patch={patch} /></Card>
-        <Card title="Encoding" detail="Choose the encoder and quality for saved videos.">
-          <Field label="Encoding engine"><select aria-label="Encoding engine" value={enc.engine} onChange={e => encoding({ engine: e.target.value as EncodingSettings["engine"] })}><option value="native">Built-in H.264</option><option value="ffmpeg">FFmpeg · custom encoder</option></select></Field>
+        <Card title="Encoding" detail="Encode directly to your save folder while recording. Completed fragments remain playable after an interruption.">
+          <p className="settings-note">Active recordings use .recording.mp4 filenames. Stopping completes the file and removes .recording from its name. Interrupted recordings stay in your save folder.</p>
           {enc.engine === "ffmpeg" && <>
             <Field label="FFmpeg executable" hint="Full path to ffmpeg.exe, or ffmpeg to search PATH."><input className="ffmpeg-path" aria-label="FFmpeg executable" defaultValue={enc.ffmpegPath ?? "ffmpeg"} title={enc.ffmpegPath} onBlur={e => encoding({ ffmpegPath: e.target.value.trim() || "ffmpeg" })} /></Field>
             <p className={ffmpeg && !ffmpeg.available ? "settings-error" : "settings-note"}>{ffmpeg ? (ffmpeg.available ? ffmpeg.version : ffmpeg.error ?? "FFmpeg was not found.") : "Checking FFmpeg..."}</p>
             <Field label="Rate control"><select aria-label="Rate control" value={enc.rateControl ?? "crf"} onChange={e => encoding({ rateControl: e.target.value as "crf" | "bitrate", bitrateMbps: e.target.value === "bitrate" ? (enc.bitrateMbps || 15) : 0 })}><option value="crf">Constant quality (CRF / CQ / QP)</option><option value="bitrate">Target bitrate</option></select></Field>
             {(enc.rateControl ?? "crf") === "crf" && <Field label="Quality value" hint="Lower values give higher quality and larger files. Start at 20."><input aria-label="CRF / CQ quality slider" type="range" min={0} max={51} value={enc.crf ?? 20} onChange={e => encoding({ crf: Number(e.target.value) })} /><input aria-label="CRF / CQ quality" type="number" min={0} max={51} value={enc.crf ?? 20} onChange={e => encoding({ crf: Number(e.target.value) })} /></Field>}
-            <div className="audio-check-actions"><button className="settings-secondary" onClick={() => encoding({ engine: "ffmpeg", encoder: "libx264", preset: "medium", rateControl: "crf", crf: 20, bitrateMbps: 0, extraArgs: "[]", gpu: "" })}>Use balanced settings</button></div>
+            <div className="audio-check-actions"><button className="settings-secondary" onClick={() => encoding({ engine: "ffmpeg", encoder: "libx264", preset: "veryfast", rateControl: "crf", crf: 20, bitrateMbps: 0, extraArgs: "[]", gpu: "" })}>Use balanced settings</button></div>
           </>}
-          {enc.engine === "native" && <Field label="Video quality" hint="Higher quality uses more disk space. Used when target bitrate is 0."><input aria-label="Video quality" type="range" min={10} max={100} value={enc.quality} onChange={e => encoding({ quality: Number(e.target.value) })} /><output>{enc.quality}%</output></Field>}
-          {(enc.engine === "native" || enc.rateControl === "bitrate") && <Field label="Target bitrate" hint="Enter a target in Mbps; 0 uses native quality-based encoding."><input aria-label="Target bitrate" type="number" min={0} max={200} step={0.5} value={enc.bitrateMbps} onChange={e => encoding({ bitrateMbps: Number(e.target.value) })} /><span>Mbps</span></Field>}
+          {(enc.rateControl === "bitrate") && <Field label="Target bitrate" hint="Target video bitrate in Mbps."><input aria-label="Target bitrate" type="number" min={0} max={200} step={0.5} value={enc.bitrateMbps} onChange={e => encoding({ bitrateMbps: Number(e.target.value) })} /><span>Mbps</span></Field>}
           {enc.engine === "ffmpeg" && <>
-            <Field label="Video encoder"><select aria-label="Video encoder" value={enc.encoder} onChange={e => encoding({ encoder: e.target.value, preset: e.target.value.includes("nvenc") ? "p4" : /amf|svtav1|libaom/.test(e.target.value) ? "" : "medium", gpu: "" })}>{ENCODERS.map(([v,l]) => <option key={v} value={v} disabled={!!ffmpeg?.encoders.length && !ffmpeg.encoders.includes(v)}>{l}{ffmpeg?.encoders.length && !ffmpeg.encoders.includes(v) ? " - not in this FFmpeg build" : ""}</option>)}</select></Field>
-            <Field label="Encoder preset" hint="FFmpeg preset name; leave blank for the encoder default."><input aria-label="Encoder preset" value={enc.preset} onChange={e => encoding({ preset: e.target.value })} /></Field>
+            <Field label="Video encoder"><select aria-label="Video encoder" value={enc.encoder} onChange={e => encoding({ encoder: e.target.value, preset: e.target.value.includes("nvenc") ? "p4" : /amf|svtav1|libaom/.test(e.target.value) ? "" : "veryfast", gpu: "" })}>{ENCODERS.map(([v,l]) => <option key={v} value={v} disabled={!!ffmpeg?.encoders.length && !ffmpeg.encoders.includes(v)}>{l}{ffmpeg?.encoders.length && !ffmpeg.encoders.includes(v) ? " - not in this FFmpeg build" : ""}</option>)}</select></Field>
+            <Field label="Encoder preset" hint="Use a fast preset for live recording; leave blank for the encoder default."><input aria-label="Encoder preset" value={enc.preset} onChange={e => encoding({ preset: e.target.value })} /></Field>
             {enc.encoder.includes("nvenc") && <Field label="GPU device index" hint="Leave blank for automatic selection. NVIDIA indices start at 0."><input aria-label="GPU device index" placeholder="Automatic" value={enc.gpu} onChange={e => encoding({ gpu: e.target.value })} /></Field>}
             <p className="settings-note">The encoder must be supported by your FFmpeg build and hardware. An unavailable encoder reports an error.</p>
             <div className="encoder-check">
               <div className="audio-check-actions"><button className="settings-secondary" disabled={testing || !ffmpeg?.available || !!argsError} onClick={() => void checkEncoder()}>{testing ? "Testing encoder…" : "Test encoder"}</button><span>Generates a half-second 720p clip. No screen or microphone capture.</span></div>
               {testResult?.key === testKey ? <p role={testResult.ok ? "status" : "alert"} className={testResult.ok ? "settings-note" : "settings-error"}>{testResult.message}</p> : !testing && <p className="settings-note">Current settings have not been tested.</p>}
             </div>
-            <details className="settings-advanced"><summary>Advanced FFmpeg arguments</summary><p>Add output arguments as a JSON array. They are passed directly to FFmpeg without a shell, after the generated encoding options.</p><textarea aria-label="Advanced FFmpeg arguments" defaultValue={enc.extraArgs} spellCheck={false} placeholder={'["-g", "120", "-bf", "2"]'} onBlur={e => { try { const value: unknown = JSON.parse(e.target.value); if (!Array.isArray(value) || !value.every(v => typeof v === "string")) throw Error(); setArgsError(""); encoding({ extraArgs: e.target.value }); } catch { setArgsError('Enter a JSON array of strings, for example ["-g", "120"].'); } }} />{argsError && <p role="alert" className="settings-error">{argsError}</p>}<p>Input, trimming, audio selection, and the output path are managed by WinShotX. Advanced arguments can override codec options.</p></details>
+            <details className="settings-advanced"><summary>Advanced FFmpeg arguments</summary><p>Add output arguments as a JSON array. They are passed directly to FFmpeg without a shell, after the generated encoding options.</p><textarea aria-label="Advanced FFmpeg arguments" defaultValue={enc.extraArgs} spellCheck={false} placeholder={'["-g", "120", "-bf", "2"]'} onBlur={e => { try { const value: unknown = JSON.parse(e.target.value); if (!Array.isArray(value) || !value.every(v => typeof v === "string")) throw Error(); setArgsError(""); encoding({ extraArgs: e.target.value }); } catch { setArgsError('Enter a JSON array of strings, for example ["-g", "120"].'); } }} />{argsError && <p role="alert" className="settings-error">{argsError}</p>}<p>Capture inputs, audio selection, and fragmented MP4 output are managed by WinShotX. Advanced arguments override codec options; recovery flags are always applied.</p></details>
           </>}
         </Card>
         <button className="settings-primary" onClick={() => void trayMenuAction("record").catch(e => setError(String(e)))}><Video size={16} /> Select a region to record</button>

@@ -6,7 +6,6 @@ pub mod crono;
 pub mod encode;
 pub mod enlaces;
 pub mod error;
-mod exporter;
 mod hotkeys;
 mod platform;
 pub mod record;

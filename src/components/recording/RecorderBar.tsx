@@ -7,8 +7,6 @@ import { EVENTS, type RecordingTick } from "../../lib/types";
 import { IconButton } from "../ui/IconButton";
 import { useT } from "../../lib/i18n";
 
-/** A partir de aqui el cache de fotogramas empieza a comerse el disco de verdad. */
-export const CACHE_AVISO = 1_000_000_000;
 
 /** Cuanto se queda armado el boton de descartar esperando el segundo clic. */
 export const DESCARTAR_ARMADO_MS = 4_000;
@@ -102,7 +100,6 @@ export function RecorderBar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [descartar, pausar]);
 
-  const cacheGrande = tick.bytes > CACHE_AVISO;
 
   return (
     <div
@@ -155,10 +152,10 @@ export function RecorderBar() {
             </span>
           )}
           {/* El tamanno solo cuando importa: por encima del aviso, en ambar. */}
-          {cacheGrande && (
+          {tick.bytes > 0 && (
             <span
-              title={t("The lossless cache is taking up a lot of disk: stop and export")}
-              className="text-[13px] leading-none tabular-nums text-amber-400"
+              title={tick.outputPath ?? "Written to the recording file"}
+              className="text-[13px] leading-none tabular-nums text-neutral-400"
             >
               {formatBytes(tick.bytes)}
             </span>

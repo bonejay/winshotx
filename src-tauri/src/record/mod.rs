@@ -10,6 +10,7 @@ use crate::error::{AppError, Result};
 
 #[cfg(windows)]
 pub mod audio;
+pub mod stream_encoder;
 pub mod delta;
 pub mod mezcla;
 #[cfg(windows)]

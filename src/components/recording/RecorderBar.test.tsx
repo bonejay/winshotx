@@ -7,7 +7,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CACHE_AVISO, DESCARTAR_ARMADO_MS, RecorderBar } from "./RecorderBar";
+import { DESCARTAR_ARMADO_MS, RecorderBar } from "./RecorderBar";
 import { aplicarIdioma } from "../../lib/i18n";
 import { EVENTS, type RecordingTick } from "../../lib/types";
 import { emite, llamadas } from "../../test/preparar";
@@ -61,9 +61,9 @@ describe("lo que dice la barra", () => {
     await act(async () => {
       emite(EVENTS.recordingTick, tick({ bytes: 20_000_000 }));
     });
-    expect(screen.queryByText(/MB/)).toBeNull();
+    expect(screen.getByText(/MB/)).toBeInTheDocument();
     await act(async () => {
-      emite(EVENTS.recordingTick, tick({ bytes: CACHE_AVISO + 1 }));
+      emite(EVENTS.recordingTick, tick({ bytes: 1_000_000_001 }));
     });
     expect(screen.getByText(/GB|MB/)).toBeInTheDocument();
   });

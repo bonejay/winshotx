@@ -883,7 +883,7 @@ fn sitio_de_la_barra(region: Rect, monitor: Option<MonitorSitio>) -> (i32, i32) 
 
 /// Ancho y alto de la barra de grabacion, en pixeles logicos. Los mismos que pide el
 /// constructor de la ventana: si se separan, la barra deja de quedar centrada.
-const BARRA_ANCHO: f64 = 450.0;
+const BARRA_ANCHO: f64 = 540.0;
 const BARRA_ALTO: f64 = 56.0;
 
 /// Los datos de un monitor que hacen falta para colocar una ventana encima.
@@ -1081,7 +1081,7 @@ mod tests {
     fn la_barra_va_centrada_debajo_de_la_region() {
         let principal = monitor(0, 0, 1920, 1080);
         let (x, y) = sitio_de_la_barra(region(500, 100, 400, 300), Some(principal));
-        assert_eq!(x, 500 + (400 - 450) / 2, "centrada con la región");
+        assert_eq!(x, 500 + (400 - BARRA_ANCHO as i32) / 2, "centrada con la región");
         assert_eq!(y, 100 + 300 + 12);
     }
 

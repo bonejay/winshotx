@@ -6,7 +6,7 @@ use crate::error::{AppError, Result};
 #[cfg(windows)]
 const NO_WINDOW: u32 = 0x0800_0000; // CREATE_NO_WINDOW: nada de consolas parpadeando
 
-fn command(executable: &str) -> Command {
+pub(crate) fn command(executable: &str) -> Command {
     let mut cmd = Command::new(executable);
     #[cfg(windows)]
     {
@@ -112,7 +112,7 @@ pub fn test_encoding(
     options: &crate::settings::EncodingSettings,
     fps: u32,
 ) -> Result<EncoderCheck> {
-    use std::process::Stdio;
+    use crate::record::stream_encoder::{AudioFormat, Encoder, OutputPaths};
     use std::time::{Duration, Instant};
     validate(options)?;
     if !(5..=120).contains(&fps) {
@@ -121,86 +121,57 @@ pub fn test_encoding(
         ));
     }
     let dir = std::env::temp_dir().join(format!("winshotx-encoder-test-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir)?;
+    let started = Instant::now();
     let result = (|| {
-        let destination = dir.join("test.mp4");
-        let mut args = mp4_args(
-            Path::new("generated"),
-            &destination,
-            fps,
+        let paths = OutputPaths::reserve(&dir)?;
+        let mut encoder = Encoder::start(
+            paths,
+            options,
             1280,
             720,
-            options.quality,
-            options,
+            fps,
+            Some(AudioFormat {
+                channels: 2,
+                sample_rate: 48000,
+            }),
         )?;
-        let input = args.iter().position(|a| a == "-i").unwrap();
-        args.splice(
-            input..input + 2,
-            [
-                "-f".into(),
-                "lavfi".into(),
-                "-i".into(),
-                format!("testsrc2=duration=0.5:size=1280x720:rate={fps}"),
-                "-f".into(),
-                "lavfi".into(),
-                "-i".into(),
-                "sine=duration=0.5:frequency=440:sample_rate=48000".into(),
-            ],
-        );
-        args.splice(
-            0..0,
-            ["-hide_banner".into(), "-loglevel".into(), "error".into()],
-        );
-        let error_path = dir.join("error.txt");
-        let started = Instant::now();
-        let mut child = command(&options.ffmpeg_path)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(std::fs::File::create(&error_path)?)
-            .spawn()
-            .map_err(|e| AppError::Msg(format!("Could not start FFmpeg: {e}")))?;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() < Duration::from_secs(20) => {
-                    std::thread::sleep(Duration::from_millis(50))
-                }
-                other => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(AppError::Msg(match other {
-                        Err(e) => format!("Could not check FFmpeg: {e}"),
-                        _ => {
-                            "The encoder test exceeded 20 seconds. Try a faster encoder or preset."
-                                .into()
-                        }
-                    }));
-                }
+        let mut bgra = vec![0u8; 1280 * 720 * 4];
+        for (i, pixel) in bgra.chunks_exact_mut(4).enumerate() {
+            pixel.copy_from_slice(&[(i % 256) as u8, (i / 1280 % 256) as u8, 100, 255]);
+        }
+        let tone = |start: u32, end: u32| -> Vec<u8> {
+            let mut data = Vec::with_capacity((end - start) as usize * 4);
+            for t in start..end {
+                let value =
+                    ((t as f64 * 440.0 * std::f64::consts::TAU / 48000.0).sin() * 5000.0) as i16;
+                data.extend_from_slice(&value.to_le_bytes());
+                data.extend_from_slice(&value.to_le_bytes());
             }
+            data
         };
-        if !status.success() {
-            let stderr = std::fs::read_to_string(&error_path).unwrap_or_default();
-            let lines: Vec<_> = stderr.lines().collect();
-            return Err(AppError::Msg(format!(
-                "Encoder test failed: {}",
-                lines[lines.len().saturating_sub(8)..].join(" | ")
-            )));
+        let count = fps.div_ceil(2);
+        encoder.audio(tone(0, count * 48000 / fps))?;
+        encoder.end_audio();
+        for i in 0..count {
+            if started.elapsed() >= Duration::from_secs(20) {
+                return Err(AppError::Msg(
+                    "The encoder test exceeded 20 seconds. Try a faster preset or encoder.".into(),
+                ));
+            }
+            bgra[0] = i as u8;
+            encoder.video(&bgra)?;
         }
-        let bytes = std::fs::metadata(&destination)?.len();
-        if bytes == 0 {
-            return Err(AppError::Msg("FFmpeg produced an empty test file.".into()));
-        }
+        let path = encoder.finish_by(started + Duration::from_secs(20))?;
         Ok(EncoderCheck {
             width: 1280,
             height: 720,
             fps,
-            bytes,
+            bytes: std::fs::metadata(path)?.len(),
             elapsed_ms: started.elapsed().as_millis() as u64,
         })
     })();
     let _ = std::fs::remove_dir_all(&dir);
-    result
+    result.map_err(|e: AppError| AppError::Msg(format!("Encoder test failed: {e}")))
 }
 
 pub fn mp4_from_video(
@@ -280,25 +251,33 @@ fn mp4_args(
     options: &crate::settings::EncodingSettings,
 ) -> Result<Vec<String>> {
     validate(options)?;
-    let crf = if options.rate_control == "crf" {
-        u32::from(options.crf)
-    } else {
-        34 - (quality.clamp(10, 100) as u32 * 20) / 100
-    };
-    let filter = format!("fps={fps},scale={width}:{height}:flags=lanczos");
+    let _ = quality;
     let mut args = vec![
         "-y".into(),
         "-nostdin".into(),
         "-i".into(),
-        source.to_string_lossy().to_string(),
+        source.to_string_lossy().into_owned(),
         "-vf".into(),
-        filter,
+        format!("fps={fps},scale={width}:{height}:flags=lanczos"),
+        "-movflags".into(),
+        "+faststart".into(),
+    ];
+    args.extend(codec_args(options)?);
+    let extra: Vec<String> = serde_json::from_str(&options.extra_args)
+        .map_err(|_| AppError::Msg("Invalid FFmpeg arguments.".into()))?;
+    args.extend(extra);
+    args.push(destination.to_string_lossy().into_owned());
+    Ok(args)
+}
+
+pub(crate) fn codec_args(options: &crate::settings::EncodingSettings) -> Result<Vec<String>> {
+    validate(options)?;
+    let crf = options.crf;
+    let mut args = vec![
         "-c:v".into(),
         options.encoder.clone(),
         "-pix_fmt".into(),
         "yuv420p".into(),
-        "-movflags".into(),
-        "+faststart".into(),
         "-c:a".into(),
         "aac".into(),
         "-b:a".into(),
@@ -338,10 +317,6 @@ fn mp4_args(
     } else {
         args.extend(["-crf".into(), crf.to_string()]);
     }
-    let extra: Vec<String> = serde_json::from_str(&options.extra_args)
-        .map_err(|_| AppError::Msg("Invalid FFmpeg arguments.".into()))?;
-    args.extend(extra);
-    args.push(destination.to_string_lossy().into_owned());
     Ok(args)
 }
 

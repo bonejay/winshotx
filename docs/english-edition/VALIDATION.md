@@ -1,16 +1,15 @@
 # English edition validation
 
-The fork uses a native Windows tray menu, English-only controls, screenshots, and on-demand video recording. GIF, background recording, replay, and the entire editor UI/backend have been removed. Recordings save directly as MP4.
+The fork uses a native Windows tray menu, English-only controls, screenshots, and on-demand video recording. GIF, background recording, replay, and the entire editor UI/backend have been removed. Recordings are encoded live by FFmpeg into a fragmented MP4 in the save folder.
 
 ## Verified locally
 
 - 133 frontend tests passed, including audio endpoint selection and signal meters, CRF slider/field synchronization, manual encoder tests and result invalidation, Shift+Print Screen keyup handling, independent default selection modes, and removal of editor actions.
-- Production TypeScript/Vite build passed. Rust `cargo check --tests` passed.
-- Native unit tests: 133 passed, 27 hardware/manual tests ignored by default.
-- Real direct-save integration test passed for native H.264, copying a streamed recording, and FFmpeg H.264 with AAC audio. Invalid output settings fail while retaining the temporary source.
-- Real FFmpeg tests passed using `C:\Program Files (x86)\SVP 4\utils\ffmpeg.exe` (FFmpeg 7.1.1): H.264/AAC at 120 fps with CRF 20, paths containing spaces, the new 1280 × 720 manual encoder check, and an invalid-preset failure. Native Media Foundation also encoded 120 fps at 320 × 180.
+- TypeScript type check passed.
+- Live-encoding change: Rust was not compiled locally (no toolchain on the validation machine). CI runs `record::stream_encoder::tests` (frame clock without drift, audio gap/overlap/bound handling, legacy-setting migration, fragmented-MP4 muxing enforced after custom arguments) with the existing unit tests and the release build.
+- Hardware/FFmpeg tests for the live pipeline are ignored by default; run them with `cargo test --lib -- --ignored live_`. They cover file growth during recording and rename on stop, playable fragments after killing FFmpeg, playable video+AAC after killing the recording process, discard deleting only the owned partial file, audio EOF before short video, picture/tone sync under 50 ms, pause exclusion with a static source, and 720p with real WASAPI audio.
 - Audio setup enumerated three local endpoints, opened the default playback device and microphone, stopped after frontend polling ceased, and rejected a nonexistent endpoint without fallback.
-- Three capture-pacing tests cover 120 fps from 144 Hz and 240 Hz source schedules and delivery jitter. The raw-frame queue holds at most two frames. The recording bar counts processed capture frames, independently of cache deduplication.
+- Three capture-pacing tests cover 120 fps from 144 Hz and 240 Hz source schedules and delivery jitter. The raw-frame queue holds at most two frames. The recording bar counts delivered capture frames and shows the size of the file being written.
 - Settings use 16 px labels, 15 px controls, and 14 px explanatory text. Native select popups have explicit dark/light background, text, and disabled-option colors.
 - Browser visual checks use mocked Tauri responses at 1100 × 840. Screenshots show implemented layout, not hardware capture or encoder performance.
 - Prior native startup checks confirmed both full-screen capture overlays hidden while idle, with only the settings window visible.
@@ -19,9 +18,9 @@ The fork uses a native Windows tray menu, English-only controls, screenshots, an
 
 Encoder tests are manual and generate a half-second 720p clip with a tone; they do not access capture/audio devices. They use the selected settings and time out after 20 seconds. Changes invalidate the visible result; an older asynchronous result cannot validate newer settings.
 
-120 fps remains a target. Sustained full-resolution capture and vendor-specific GPU encoding have not been benchmarked. FFmpeg saving uses a native H.264 intermediate; its final quality is set by CRF/CQ/QP or target bitrate, not the hidden built-in percentage setting.
+120 fps remains a target. Sustained full-resolution capture and vendor-specific GPU encoding have not been benchmarked. Live encoding must keep up in real time: falling more than two seconds behind stops the recording with an error and keeps the fragments already written.
 
-Each recording keeps its encoding/save preferences from startup. Cache clearing is blocked during saving. Save errors show the reason and retained source directory; failed sessions are excluded from automatic stale-cache deletion.
+Each recording reads encoding and save preferences when it starts. Errors show FFmpeg's last output and the path of the retained `.recording.mp4` file. Audio arriving more than two seconds late fails the recording instead of drifting.
 
 The executable is unsigned. Upstream signed automatic updates are disabled; this fork has its own application identifier and temporary storage.
 

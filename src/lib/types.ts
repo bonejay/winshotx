@@ -78,6 +78,7 @@ export interface SessionInfo {
 }
 
 export interface RecordingTick {
+  outputPath?: string;
   elapsedMs: number;
   frames: number;
   bytes: number;

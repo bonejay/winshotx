@@ -778,6 +778,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings> {
 
 #[tauri::command]
 pub async fn set_settings(app: AppHandle, mut settings: Settings) -> Result<Settings> {
+    settings.encoding = crate::record::stream_encoder::streaming_options(&settings.encoding);
     settings.language = crate::settings::Language::En;
     settings.replay_enabled = false;
     settings.onboarded = true;

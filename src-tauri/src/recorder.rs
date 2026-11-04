@@ -7,9 +7,10 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture::Rect;
 use crate::error::{AppError, Result};
-use crate::record::{self, FrameCache, SessionData};
+use crate::record::stream_encoder::{self, AudioFormat, AudioTimeline, Encoder, OutputPaths};
 use crate::state::{AppState, Cabecera, RecordingState};
 use crate::windows_mgr;
+use std::path::PathBuf;
 
 pub const EVENT_TICK: &str = "winshotx://recording-tick";
 #[derive(Debug, Clone, Deserialize)]
@@ -34,6 +35,7 @@ pub struct RecordingTick {
     pub format: String,
     pub audio: bool,
     pub microphone: bool,
+    pub output_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -48,24 +50,6 @@ pub struct SessionInfo {
     pub format: String,
     pub mp4_path: Option<String>,
 }
-pub(crate) fn bgra_a_rgba_en_sitio(pixeles: &mut [u8]) {
-    for pixel in pixeles.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-}
-fn flip_rows_en(input: &[u8], width: u32, height: u32, out: &mut Vec<u8>) {
-    let stride = width as usize * 4;
-    out.clear();
-    out.resize(input.len(), 0);
-    for y in 0..height as usize {
-        let src = y * stride;
-        let dst = (height as usize - 1 - y) * stride;
-        if src + stride <= input.len() && dst + stride <= out.len() {
-            out[dst..dst + stride].copy_from_slice(&input[src..src + stride]);
-        }
-    }
-}
-
 fn monitor_origin(app: &AppHandle, region: Rect) -> (i32, i32) {
     let state = app.state::<AppState>();
     let (cx, cy) = region.center();
@@ -82,361 +66,305 @@ fn monitor_origin(app: &AppHandle, region: Rect) -> (i32, i32) {
         .and_then(|m| Some((m.x().ok()?, m.y().ok()?)))
         .unwrap_or((0, 0))
 }
-#[cfg(windows)]
-struct SalidaDeAudio {
-    captura: Option<crate::record::audio::Captura>,
-    archivo: Option<std::io::BufWriter<std::fs::File>>,
-    escritos: u64,
-}
 
-#[cfg(windows)]
-impl SalidaDeAudio {
-    fn abrir(captura: Option<crate::record::audio::Captura>, ruta: std::path::PathBuf) -> Self {
-        let archivo = captura.as_ref().and_then(|_| {
-            std::fs::File::create(ruta)
-                .ok()
-                .map(std::io::BufWriter::new)
-        });
-        Self {
-            captura,
-            archivo,
-            escritos: 0,
-        }
-    }
-
-    fn formato(&self) -> Option<crate::record::audio::Formato> {
-        self.captura.as_ref().map(|c| c.formato)
-    }
-    fn volcar(&mut self, encoder: &mut Option<windows_capture::encoder::VideoEncoder>) {
-        use std::io::Write;
-        let Some(captura) = self.captura.as_ref() else {
-            return;
-        };
-        while let Ok(trozo) = captura.trozos.try_recv() {
-            let pcm = crate::record::audio::a_pcm16(&trozo.datos);
-            if let Some(f) = self.archivo.as_mut() {
-                if f.write_all(&pcm).is_ok() {
-                    self.escritos += pcm.len() as u64;
-                }
-            }
-            let Some(codificador) = encoder.as_mut() else {
-                continue;
-            };
-            if codificador
-                .send_audio_buffer(&pcm, trozo.desde_el_inicio)
-                .is_err()
-            {
-                *encoder = None;
-            }
-        }
-    }
-    fn cerrar(
-        mut self,
-        encoder: &mut Option<windows_capture::encoder::VideoEncoder>,
-    ) -> Option<record::AudioInfo> {
-        use std::io::Write;
-        self.volcar(encoder);
-        let captura = self.captura.take()?;
-        let formato = captura.formato;
-        captura.parar();
-        if let Some(mut f) = self.archivo.take() {
-            let _ = f.flush();
-        }
-        (self.escritos > 0).then_some(record::AudioInfo {
-            channels: formato.canales,
-            sample_rate: formato.muestras_por_segundo,
-        })
-    }
-}
 #[cfg(windows)]
 pub fn start(app: &AppHandle, region: Rect, options: RecordOptions) -> Result<SessionInfo> {
-    use std::sync::mpsc::sync_channel;
-
     use crate::record::win::{self, CaptureFlags};
-
+    use std::sync::mpsc::sync_channel;
     if options.format != "video" {
         return Err(AppError::Msg(
             "Only MP4 video recording is supported.".into(),
         ));
     }
     let state = app.state::<AppState>();
-    if state.is_recording() {
+    let mut slot = state.recording.lock();
+    if slot.is_some() {
         return Err(AppError::Msg("A recording is already in progress".into()));
     }
-
+    let settings = state.settings.read().clone();
+    let encoding = stream_encoder::streaming_options(&settings.encoding);
+    crate::encode::ffmpeg::validate(&encoding)?;
     crate::audio_devices::stop(None);
     let region = region.to_even();
-    let id = uuid::Uuid::new_v4().simple().to_string()[..10].to_string();
-    let dir = state.session_dir(&id);
-    std::fs::create_dir_all(&dir)?;
-
     let fps = options.fps.clamp(5, 120);
     let origin = monitor_origin(app, region);
-    let ventana = options.window.filter(|h| *h != 0);
-
-    let session_seed = SessionData {
-        id: id.clone(),
-        dir: dir.clone(),
-        region,
-        fps,
-        format: options.format.clone(),
-        has_audio: false, // se pone a cierto abajo, si el altavoz llega a abrirse
-        width: region.width,
-        height: region.height,
-        mp4_path: Some(dir.join("recording.mp4")),
-        audio: None,
-        frames: Vec::new(),
-    };
-
     let stop = Arc::new(AtomicBool::new(false));
     let pause = Arc::new(AtomicBool::new(false));
-    let descartar = Arc::new(AtomicBool::new(false));
     let paused_ms = Arc::new(AtomicU64::new(0));
-    let reloj_inicio = Instant::now();
-    let frames_counter = Arc::new(AtomicU64::new(0));
-    let bytes_counter = Arc::new(AtomicU64::new(0));
-    let fuentes = crate::record::audio::Fuentes {
+    let fin_ms = Arc::new(AtomicU64::new(0));
+    let discard = Arc::new(AtomicBool::new(false));
+    let frames = Arc::new(AtomicU64::new(0));
+    let bytes = Arc::new(AtomicU64::new(0));
+    let sources = crate::record::audio::Fuentes {
         sistema: options.audio,
         microfono: options.microphone,
     };
-    let audio = if fuentes.ninguna() {
+    let audio = if sources.ninguna() {
         None
     } else {
-        let audio_settings = state.settings.read().clone();
         Some(crate::record::audio::empezar_con_dispositivos(
-            fuentes,
+            sources,
             pause.clone(),
-            audio_settings.system_audio_device,
-            audio_settings.microphone_device,
+            settings.system_audio_device.clone(),
+            settings.microphone_device.clone(),
         )?)
     };
-    windows_mgr::close_overlays(app);
-    let cabecera = Cabecera {
-        format: options.format.clone(),
-        audio: audio.is_some() && fuentes.sistema,
-        microphone: audio.is_some() && fuentes.microfono,
-    };
-
-    let (sender, receiver) = sync_channel::<win::CapturedFrame>(2);
-    let writer_frames = frames_counter.clone();
-    let writer_bytes = bytes_counter.clone();
-    let writer_stop = stop.clone();
-    let fin_ms = Arc::new(AtomicU64::new(0));
-    let writer_fin = fin_ms.clone();
-    let writer_descartar = descartar.clone();
-    let reciclados = win::Reciclados::default();
-    let reciclados_escritor = reciclados.clone();
-    let encoding = state.settings.read().encoding.clone();
-    let writer = std::thread::spawn(move || -> Result<SessionData> {
-        let mut session = session_seed;
-        session.has_audio = audio.is_some();
-        let (width, height) = (session.width, session.height);
-        let mut cache = FrameCache::new(&session.dir)?;
-        let mut salida = SalidaDeAudio::abrir(audio, session.audio_path());
-        let mut encoder = build_recording_encoder(&session, salida.formato(), &encoding);
-        let mut last_ts = 0u64;
-        let mut dado_la_vuelta: Vec<u8> = Vec::new();
-        loop {
-            let frame = match receiver.recv_timeout(Duration::from_millis(200)) {
-                Ok(frame) => frame,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    if writer_stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    salida.volcar(&mut encoder);
-                    continue;
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-            };
-            last_ts = frame.ts_ms;
-            let para_vista_previa = encoder.is_some();
-            if para_vista_previa {
-                flip_rows_en(&frame.bgra, width, height, &mut dado_la_vuelta);
-            }
-            let mut rgba = frame.bgra;
-            bgra_a_rgba_en_sitio(&mut rgba);
-
-            writer_frames.fetch_add(1, Ordering::Relaxed);
-            if cache.push_rgba(&rgba, width, height, frame.ts_ms)? {
-                writer_bytes.store(cache.bytes_written(), Ordering::Relaxed);
-            }
-            if let Some(enc) = encoder.as_mut().filter(|_| para_vista_previa) {
-                if let Err(error) =
-                    enc.send_frame_buffer(&dado_la_vuelta, frame.ts_ms as i64 * 10_000)
-                {
-                    eprintln!("[winshotx] se ha caido la vista previa en vivo: {error}");
-                    encoder = None;
-                }
-            }
-            reciclados_escritor.devolver(rgba);
-            salida.volcar(&mut encoder);
-        }
-        let grabado_ms = writer_fin.load(Ordering::Relaxed).max(last_ts);
-        if grabado_ms > last_ts && !dado_la_vuelta.is_empty() {
-            if let Some(enc) = encoder.as_mut() {
-                if let Err(error) =
-                    enc.send_frame_buffer(&dado_la_vuelta, grabado_ms as i64 * 10_000)
-                {
-                    eprintln!("[winshotx] la vista previa no ha podido cerrar el final: {error}");
-                }
-            }
-        }
-
-        session.audio = salida.cerrar(&mut encoder);
-        session.has_audio = session.audio.is_some();
-        let vista_previa_cerrada = encoder.take().is_some_and(|enc| enc.finish().is_ok());
-        if !vista_previa_cerrada {
-            session.mp4_path = None;
-        }
-
-        session.frames = cache.finish(grabado_ms, session.fps)?;
-        if writer_descartar.load(Ordering::Relaxed) {
-            return Ok(session);
-        }
-        session.persist()?;
-        Ok(session)
+    let started = audio
+        .as_ref()
+        .map(|a| a.started)
+        .unwrap_or_else(Instant::now);
+    let audio_format = audio.as_ref().map(|a| AudioFormat {
+        channels: a.formato.canales,
+        sample_rate: a.formato.muestras_por_segundo,
     });
-
-    let flags_base = CaptureFlags {
+    let paths = OutputPaths::reserve(std::path::Path::new(&settings.save_directory))?;
+    let encoder = match Encoder::start(
+        paths.clone(),
+        &encoding,
+        region.width,
+        region.height,
+        fps,
+        audio_format,
+    ) {
+        Ok(encoder) => encoder,
+        Err(error) => {
+            let _ = std::fs::remove_file(&paths.partial);
+            return Err(error);
+        }
+    };
+    windows_mgr::close_overlays(app);
+    let (sender, receiver) = sync_channel(2);
+    let recycled = win::Reciclados::default();
+    let flags = CaptureFlags {
         sender,
         crop: (0, 0, 0, 0),
         stop: stop.clone(),
         pause: pause.clone(),
         paused_ms: paused_ms.clone(),
-        min_interval: std::time::Duration::ZERO,
-        start: reloj_inicio,
-        reciclados,
+        min_interval: Duration::ZERO,
+        start: started,
+        reciclados: recycled.clone(),
     };
-    let control = match ventana {
-        Some(hwnd) => {
-            win::start_window(hwnd, state.settings.read().capture_cursor, fps, flags_base)?
+    let capture = match options.window.filter(|h| *h != 0) {
+        Some(hwnd) => win::start_window(hwnd, settings.capture_cursor, fps, flags),
+        None => win::start(region, origin, settings.capture_cursor, fps, flags),
+    };
+    let control = match capture {
+        Ok(c) => c,
+        Err(e) => {
+            encoder.cancel();
+            return Err(e);
         }
-        None => win::start(
-            region,
-            origin,
-            state.settings.read().capture_cursor,
+    };
+    let writer_stop = stop.clone();
+    let writer = {
+        let timing = WriterTiming {
+            started,
             fps,
-            flags_base,
-        )?,
+            stop: stop.clone(),
+            pause: pause.clone(),
+            paused_ms: paused_ms.clone(),
+            finish_ms: fin_ms.clone(),
+            discard: discard.clone(),
+            frames: frames.clone(),
+            bytes: bytes.clone(),
+        };
+        std::thread::spawn(move || {
+            let path = encoder.path().to_owned();
+            let result = write_recording(encoder, receiver, audio, recycled, timing);
+            writer_stop.store(true, Ordering::Release);
+            result.map_err(|e| {
+                AppError::Msg(format!(
+                    "{e}\n\nRecording fragments retained at {}",
+                    path.display()
+                ))
+            })
+        })
     };
-    let marco = match crate::platform::marco::Marco::abrir(region, grosor_del_marco(region)) {
-        Ok(marco) => Some(marco),
-        Err(error) => {
-            eprintln!("[winshotx] sin marco alrededor de la grabacion: {error}");
-            None
-        }
-    };
-
-    let recording = RecordingState {
-        settings: state.settings.read().clone(),
-        started: reloj_inicio,
+    let marco = crate::platform::marco::Marco::abrir(region, grosor_del_marco(region)).ok();
+    *slot = Some(RecordingState {
+        output: paths.partial.clone(),
+        play_sound: settings.play_sound,
+        started,
         stop: stop.clone(),
-        pause: pause.clone(),
-        paused_ms: paused_ms.clone(),
+        pause,
+        paused_ms,
         pause_started: parking_lot::Mutex::new(None),
         fin_ms,
-        frames: frames_counter,
-        bytes: bytes_counter,
-        cabecera,
+        frames,
+        bytes,
+        cabecera: Cabecera {
+            format: "video".into(),
+            audio: sources.sistema,
+            microphone: sources.microfono,
+        },
+        descartar: discard,
+        barra: None,
         control: Some(control),
         marco,
-        descartar,
-        barra: None,
         writer: Some(writer),
-    };
-
-    let info = SessionInfo {
-        id: id.clone(),
-        region,
-        fps,
-        frame_count: 0,
-        duration_ms: 0,
-        has_audio: false,
-        format: options.format,
-        mp4_path: None,
-    };
-
-    *state.recording.lock() = Some(recording);
-    crate::audio_devices::stop(None);
+    });
+    drop(slot);
     match windows_mgr::open_recorder(app, region) {
         Ok(label) => {
             if let Some(recording) = state.recording.lock().as_mut() {
                 recording.barra = Some(label);
             }
         }
-        Err(error) => eprintln!("no se ha podido abrir la barra de grabacion: {error}"),
+        Err(error) => eprintln!("Could not show the recording toolbar: {error}"),
     }
-    spawn_ticker(app.clone(), stop);
-    Ok(info)
+    spawn_ticker(app.clone(), paths.partial.clone());
+    Ok(SessionInfo {
+        id: uuid::Uuid::new_v4().to_string(),
+        region,
+        fps,
+        frame_count: 0,
+        duration_ms: 0,
+        has_audio: audio_format.is_some(),
+        format: "video".into(),
+        mp4_path: Some(paths.partial.to_string_lossy().into_owned()),
+    })
 }
+
+#[cfg(windows)]
+struct WriterTiming {
+    started: Instant,
+    fps: u32,
+    stop: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    paused_ms: Arc<AtomicU64>,
+    finish_ms: Arc<AtomicU64>,
+    discard: Arc<AtomicBool>,
+    frames: Arc<AtomicU64>,
+    bytes: Arc<AtomicU64>,
+}
+
+#[cfg(windows)]
+fn write_recording(
+    mut encoder: Encoder,
+    receiver: std::sync::mpsc::Receiver<crate::record::win::CapturedFrame>,
+    audio: Option<crate::record::audio::Captura>,
+    recycled: crate::record::win::Reciclados,
+    timing: WriterTiming,
+) -> Result<Option<PathBuf>> {
+    let mut picture: Option<Vec<u8>> = None;
+    let mut sent = 0u64;
+    let mut active = Duration::ZERO;
+    let mut timeline = audio.as_ref().map(|a| {
+        AudioTimeline::new(AudioFormat {
+            channels: a.formato.canales,
+            sample_rate: a.formato.muestras_por_segundo,
+        })
+    });
+    loop {
+        if timing.discard.load(Ordering::Acquire) {
+            encoder.cancel();
+            return Ok(None);
+        }
+        // Keep the newest frame and reuse it at output cadence while the source is static.
+        while let Ok(frame) = receiver.try_recv() {
+            if let Some(old) = picture.replace(frame.bgra) {
+                recycled.devolver(old);
+            }
+            timing.frames.fetch_add(1, Ordering::Relaxed);
+        }
+        if let (Some(source), Some(timeline)) = (audio.as_ref(), timeline.as_mut()) {
+            loop {
+                match source.trozos.try_recv() {
+                    Ok(chunk) => {
+                        let sample = ((chunk.desde_el_inicio.max(0) as u128
+                            * source.formato.muestras_por_segundo as u128
+                            + 5_000_000)
+                            / 10_000_000) as u64;
+                        timeline.push(sample, &crate::record::audio::a_pcm16(&chunk.datos))?;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        return Err(AppError::Msg(
+                            "The selected audio device stopped delivering audio.".into(),
+                        ))
+                    }
+                }
+            }
+        }
+        let stopping = timing.stop.load(Ordering::Acquire);
+        if stopping {
+            let duration = timing.finish_ms.load(Ordering::Acquire);
+            if duration > 0 {
+                active = Duration::from_millis(duration);
+            }
+        } else if !timing.pause.load(Ordering::Acquire) {
+            active = timing
+                .started
+                .elapsed()
+                .saturating_sub(Duration::from_millis(
+                    timing.paused_ms.load(Ordering::Acquire),
+                ));
+        }
+        let due = stream_encoder::frames_at(active, timing.fps).max(1);
+        if due.saturating_sub(sent) > u64::from(timing.fps) * 2 && picture.is_some() && sent > 0 {
+            return Err(AppError::Msg("The encoder fell more than two seconds behind. Choose a faster preset, hardware encoder, or lower frame rate.".into()));
+        }
+        if let Some(picture) = picture.as_ref() {
+            // FFmpeg opens/probes its inputs sequentially. Prime the actual initial
+            // audio before a large first video write can fill the TCP send buffer.
+            // Keep this short startup data in memory, never insert artificial lead-in.
+            if sent == 0 && timeline.is_some() && active < Duration::from_millis(150) && !stopping {
+                encoder.check()?;
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            // Audio is held for 150ms to absorb WASAPI packet/silence-fill jitter.
+            // Finalization pads/trims to exactly the same active-time clock as video.
+            if let Some(timeline) = timeline.as_mut() {
+                let time = if stopping || sent == 0 {
+                    active
+                } else {
+                    active.saturating_sub(Duration::from_millis(150))
+                };
+                let target = timeline.frames_at(time);
+                while timeline.cursor < target {
+                    encoder.audio(timeline.next(target))?;
+                }
+            }
+            if stopping {
+                encoder.end_audio();
+            }
+            while sent < due {
+                if !encoder.try_video(picture)? {
+                    break;
+                }
+                sent += 1;
+            }
+        } else if stopping || timing.started.elapsed() > Duration::from_secs(10) {
+            return Err(AppError::Msg(
+                "Windows did not deliver a video frame. Nothing could be recorded.".into(),
+            ));
+        }
+        timing.bytes.store(encoder.bytes(), Ordering::Relaxed);
+        encoder.check()?;
+        if stopping && sent >= due {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // Stop the endpoint threads before closing the encoder's sockets.
+    drop(audio);
+    encoder.finish().map(Some)
+}
+
 #[cfg(windows)]
 fn grosor_del_marco(region: Rect) -> i32 {
     let (cx, cy) = region.center();
-    let escala = windows_mgr::monitor_de(cx, cy)
+    let scale = windows_mgr::monitor_de(cx, cy)
         .map(|m| m.escala)
         .unwrap_or(1.0);
-    (2.0 * escala).round().max(1.0) as i32
+    (2.0 * scale).round().max(1.0) as i32
 }
 
 #[cfg(not(windows))]
 pub fn start(_app: &AppHandle, _region: Rect, _options: RecordOptions) -> Result<SessionInfo> {
     Err(AppError::Unsupported)
-}
-
-#[cfg(windows)]
-fn build_recording_encoder(
-    session: &SessionData,
-    audio: Option<crate::record::audio::Formato>,
-    encoding: &crate::settings::EncodingSettings,
-) -> Option<windows_capture::encoder::VideoEncoder> {
-    if encoding.engine == "ffmpeg" {
-        return None;
-    }
-    use windows_capture::encoder::{
-        AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-        VideoSettingsSubType,
-    };
-
-    let path = session.mp4_path.as_ref()?;
-    if crate::encode::mp4::medida_que_acepta(session.width, session.height)
-        != (session.width, session.height)
-    {
-        eprintln!(
-            "[winshotx] {}x{} es demasiado pequenno para el codificador en vivo: la vista previa se escribe al terminar",
-            session.width, session.height
-        );
-        return None;
-    }
-    let options = crate::encode::mp4::Mp4Options {
-        width: session.width,
-        height: session.height,
-        fps: session.fps,
-        quality: encoding.quality,
-        bitrate_override: None,
-    };
-    VideoEncoder::new(
-        VideoSettingsBuilder::new(session.width, session.height)
-            .sub_type(VideoSettingsSubType::H264)
-            .frame_rate(session.fps)
-            .bitrate(encoding.bitrate().unwrap_or_else(|| options.bitrate())),
-        match audio {
-            Some(formato) => AudioSettingsBuilder::default()
-                .channel_count(u32::from(formato.canales))
-                .sample_rate(formato.muestras_por_segundo)
-                .bit_per_sample(16)
-                .disabled(false),
-            None => AudioSettingsBuilder::default().disabled(true),
-        },
-        ContainerSettingsBuilder::default(),
-        path,
-    )
-    .inspect_err(|error| {
-        eprintln!(
-            "[winshotx] sin vista previa en vivo ({}x{} a {} fps): {error}",
-            session.width, session.height, session.fps
-        );
-    })
-    .ok()
 }
 fn tick_de(recording: &RecordingState, saving: bool) -> RecordingTick {
     RecordingTick {
@@ -448,6 +376,7 @@ fn tick_de(recording: &RecordingState, saving: bool) -> RecordingTick {
         format: recording.cabecera.format.clone(),
         audio: recording.cabecera.audio,
         microphone: recording.cabecera.microphone,
+        output_path: recording.output.to_string_lossy().into_owned(),
     }
 }
 fn avisar_barra(app: &AppHandle, tick: RecordingTick) {
@@ -458,25 +387,35 @@ fn avisar_barra(app: &AppHandle, tick: RecordingTick) {
     }
 }
 
-fn spawn_ticker(app: AppHandle, stop: Arc<AtomicBool>) {
-    std::thread::spawn(move || {
-        while !stop.load(Ordering::Relaxed) {
-            let tick = {
-                let state = app.state::<AppState>();
-                let guard = state.recording.lock();
-                guard.as_ref().map(|recording| tick_de(recording, false))
-            };
-            let Some(tick) = tick else { break };
-            avisar_barra(&app, tick);
-            std::thread::sleep(Duration::from_millis(200));
+fn spawn_ticker(app: AppHandle, output: PathBuf) {
+    std::thread::spawn(move || loop {
+        let tick = {
+            let state = app.state::<AppState>();
+            let guard = state.recording.lock();
+            guard.as_ref().filter(|r| r.output == output).map(|r| {
+                (
+                    tick_de(r, false),
+                    r.writer.as_ref().is_some_and(|w| w.is_finished()),
+                )
+            })
+        };
+        match tick {
+            Some((_, true)) => {
+                let _ = stop(&app);
+                break;
+            }
+            Some((tick, false)) => avisar_barra(&app, tick),
+            None => break,
         }
+        std::thread::sleep(Duration::from_millis(200));
     });
 }
-fn terminar(mut recording: RecordingState) -> Result<SessionData> {
+
+fn finish(mut recording: RecordingState) -> Result<Option<PathBuf>> {
     recording
         .fin_ms
-        .store(recording.elapsed_ms(), Ordering::Relaxed);
-    recording.stop.store(true, Ordering::Relaxed);
+        .store(recording.elapsed_ms(), Ordering::Release);
+    recording.stop.store(true, Ordering::Release);
     #[cfg(windows)]
     if let Some(control) = recording.control.take() {
         std::thread::spawn(move || {
@@ -485,109 +424,84 @@ fn terminar(mut recording: RecordingState) -> Result<SessionData> {
     }
     #[cfg(windows)]
     drop(recording.marco.take());
-
-    let writer = recording
+    recording
         .writer
         .take()
-        .ok_or_else(|| AppError::Msg("The recording writer is unavailable".into()))?;
-    writer
+        .ok_or_else(|| AppError::Msg("The recording writer is unavailable".into()))?
         .join()
-        .map_err(|_| AppError::Msg("The recording writer stopped unexpectedly".into()))?
+        .map_err(|_| {
+            AppError::Msg(format!(
+                "The encoder thread stopped unexpectedly. Recording retained at {}",
+                recording.output.display()
+            ))
+        })?
 }
+
 pub fn stop(app: &AppHandle) -> Result<()> {
     let state = app.state::<AppState>();
-    let Some(recording) = state.recording.lock().take() else {
-        return Err(AppError::NoRecording);
-    };
+    let recording = state.recording.lock().take().ok_or(AppError::NoRecording)?;
     avisar_barra(app, tick_de(&recording, true));
-    let barra = recording.barra.clone();
-    let settings = recording.settings.clone();
+    let bar = recording.barra.clone();
+    let play_sound = recording.play_sound;
     let saving = state.saving.clone();
     saving.fetch_add(1, Ordering::SeqCst);
-    let handle = app.clone();
+    let app = app.clone();
     std::thread::spawn(move || {
-        match terminar(recording) {
-            Ok(session) if session.frames.is_empty() => {
-                eprintln!("no se ha capturado ningÃºn fotograma; prueba a bajar los fps");
-                let _ = std::fs::remove_dir_all(&session.dir);
-                cerrar_esta_barra(&handle, barra.as_deref());
+        match finish(recording) {
+            Ok(Some(path)) => {
+                if play_sound {
+                    crate::platform::sonido::obturador();
+                }
+                let _ = app.emit(
+                    "winshotx://recording-saved",
+                    path.to_string_lossy().into_owned(),
+                );
             }
-            Ok(session) => entregar(&handle, session, barra.as_deref(), &settings),
+            Ok(None) => {}
             Err(error) => {
                 use tauri_plugin_dialog::DialogExt;
-                handle
-                    .dialog()
+                app.dialog()
                     .message(error.to_string())
-                    .title("Recording failed")
+                    .title("Recording could not be completed")
                     .kind(tauri_plugin_dialog::MessageDialogKind::Error)
                     .show(|_| {});
-                cerrar_esta_barra(&handle, barra.as_deref());
             }
         }
+        close_bar(&app, bar.as_deref());
         saving.fetch_sub(1, Ordering::SeqCst);
     });
     Ok(())
 }
-fn cerrar_esta_barra(app: &AppHandle, barra: Option<&str>) {
-    match barra {
+fn close_bar(app: &AppHandle, bar: Option<&str>) {
+    match bar {
         Some(label) => windows_mgr::close_recorder_label(app, label),
         None => windows_mgr::close_recorder(app),
     }
 }
-fn entregar(
-    app: &AppHandle,
-    session: SessionData,
-    barra: Option<&str>,
-    settings: &crate::settings::Settings,
-) {
-    use tauri_plugin_dialog::DialogExt;
-    match crate::exporter::save_recording(&session, settings) {
-        Ok(path) => {
-            if settings.play_sound {
-                crate::platform::sonido::obturador();
-            }
-            let _ = app.emit(
-                "winshotx://recording-saved",
-                path.to_string_lossy().to_string(),
-            );
-            let _ = std::fs::remove_dir_all(&session.dir);
-        }
-        Err(error) => {
-            let _ = std::fs::write(session.dir.join("keep-on-error"), error.to_string());
-            app.dialog()
-                .message(format!(
-                    "{error}\n\nTemporary recording retained at {}",
-                    session.dir.display()
-                ))
-                .title("Recording could not be saved")
-                .kind(tauri_plugin_dialog::MessageDialogKind::Error)
-                .show(|_| {});
-        }
-    }
-    cerrar_esta_barra(app, barra);
-}
-
-fn cerrar_barra(app: &AppHandle, barra: Option<String>) {
-    let handle = app.clone();
-    std::thread::spawn(move || cerrar_esta_barra(&handle, barra.as_deref()));
-}
 pub fn cancel(app: &AppHandle) -> Result<()> {
-    let state = app.state::<AppState>();
-    let Some(recording) = state.recording.lock().take() else {
-        cerrar_barra(app, None);
-        return Err(AppError::NoRecording);
-    };
-    recording.descartar.store(true, Ordering::Relaxed);
-    cerrar_barra(app, recording.barra.clone());
-    std::thread::spawn(move || match terminar(recording) {
-        Ok(session) => {
-            let _ = std::fs::remove_dir_all(&session.dir);
+    let recording = app
+        .state::<AppState>()
+        .recording
+        .lock()
+        .take()
+        .ok_or(AppError::NoRecording)?;
+    recording.descartar.store(true, Ordering::Release);
+    let bar = recording.barra.clone();
+    let partial = recording.output.clone();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        match finish(recording) {
+            Ok(Some(path)) => {
+                let _ = std::fs::remove_file(path);
+            }
+            Err(error) => eprintln!("Recording stopped while discarding: {error}"),
+            _ => {}
         }
-        Err(error) => eprintln!("fallo al descartar: {error}"),
+        let _ = std::fs::remove_file(partial);
+        close_bar(&app, bar.as_deref());
     });
     Ok(())
 }
-
 pub fn set_paused(app: &AppHandle, paused: bool) -> Result<()> {
     let state = app.state::<AppState>();
     let guard = state.recording.lock();
@@ -609,54 +523,187 @@ pub fn set_paused(app: &AppHandle, paused: bool) -> Result<()> {
     }
     Ok(())
 }
+
 #[cfg(all(test, windows))]
-mod pruebas_de_audio {
+mod streaming_tests {
+    use super::*;
     #[test]
-    #[ignore]
-    fn el_mp4_sale_con_pista_de_sonido() {
-        use windows_capture::encoder::{
-            AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-            VideoSettingsSubType,
+    #[ignore = "Runs the actual recording writer and installed FFmpeg"]
+    fn static_source_pause_resume_and_immediate_stop_have_no_spool() {
+        use crate::record::win::{CapturedFrame, Reciclados};
+        let dir =
+            std::env::temp_dir().join(format!("winshotx-clock-test-{}", uuid::Uuid::new_v4()));
+        let paths = OutputPaths::reserve(&dir).unwrap();
+        let mut options =
+            stream_encoder::streaming_options(&crate::settings::EncodingSettings::default());
+        options.preset = "ultrafast".into();
+        let encoder = Encoder::start(paths.clone(), &options, 320, 180, 30, None).unwrap();
+        let (tx, rx) = std::sync::mpsc::sync_channel(2);
+        let stop = Arc::new(AtomicBool::new(false));
+        let pause = Arc::new(AtomicBool::new(false));
+        let paused_ms = Arc::new(AtomicU64::new(0));
+        let finish_ms = Arc::new(AtomicU64::new(0));
+        let frames = Arc::new(AtomicU64::new(0));
+        let bytes = Arc::new(AtomicU64::new(0));
+        let timing = WriterTiming {
+            started: Instant::now(),
+            fps: 30,
+            stop: stop.clone(),
+            pause: pause.clone(),
+            paused_ms: paused_ms.clone(),
+            finish_ms: finish_ms.clone(),
+            discard: Arc::new(AtomicBool::new(false)),
+            frames: frames.clone(),
+            bytes: bytes.clone(),
         };
-
-        let (ancho, alto, fps) = (320u32, 240u32, 30u32);
-        let unico = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let destino = std::env::temp_dir().join(format!("winshotx-audio-{unico}.mp4"));
-
-        let mut encoder = VideoEncoder::new(
-            VideoSettingsBuilder::new(ancho, alto)
-                .sub_type(VideoSettingsSubType::H264)
-                .frame_rate(fps)
-                .bitrate(2_000_000),
-            AudioSettingsBuilder::default()
-                .channel_count(2)
-                .sample_rate(48_000)
-                .bit_per_sample(16)
-                .disabled(false),
-            ContainerSettingsBuilder::default(),
-            &destino,
+        tx.send(CapturedFrame {
+            bgra: vec![80; 320 * 180 * 4],
+            ts_ms: 0,
+        })
+        .unwrap();
+        let writer = std::thread::spawn(move || {
+            write_recording(encoder, rx, None, Reciclados::default(), timing)
+        });
+        std::thread::sleep(Duration::from_millis(600));
+        pause.store(true, Ordering::Release);
+        let pause_start = Instant::now();
+        std::thread::sleep(Duration::from_millis(400));
+        paused_ms.store(pause_start.elapsed().as_millis() as u64, Ordering::Release);
+        pause.store(false, Ordering::Release);
+        std::thread::sleep(Duration::from_millis(600));
+        finish_ms.store(1200, Ordering::Release);
+        stop.store(true, Ordering::Release);
+        let path = writer.join().unwrap().unwrap().unwrap();
+        drop(tx);
+        assert_eq!(
+            frames.load(Ordering::Relaxed),
+            1,
+            "The source should remain static"
+        );
+        let decoded = crate::encode::ffmpeg::command(&options.ffmpeg_path)
+            .args(["-hide_banner", "-i"])
+            .arg(&path)
+            .args(["-progress", "pipe:1", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            decoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        let progress = String::from_utf8_lossy(&decoded.stdout);
+        let count: u32 = progress
+            .lines()
+            .filter_map(|l| l.strip_prefix("frame="))
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            (36..=38).contains(&count),
+            "Paused time leaked into the video: {count} frames"
+        );
+        assert!(!paths.partial.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    #[ignore = "Opens the default playback endpoint and runs the actual live writer"]
+    fn live_large_frames_with_wasapi_audio_pause_and_resume() {
+        use crate::record::win::{CapturedFrame, Reciclados};
+        let dir =
+            std::env::temp_dir().join(format!("winshotx-audio-clock-{}", uuid::Uuid::new_v4()));
+        let paths = OutputPaths::reserve(&dir).unwrap();
+        let pause = Arc::new(AtomicBool::new(false));
+        let audio = crate::record::audio::empezar(
+            crate::record::audio::Fuentes {
+                sistema: true,
+                microfono: false,
+            },
+            pause.clone(),
         )
-        .expect("no se ha podido crear el codificador");
-        let bgra = vec![90u8; (ancho * alto) as usize * 4];
-        let por_fotograma = vec![0u8; (48_000 / 30) * 2 * 2];
-        for i in 0..fps {
-            encoder
-                .send_frame_buffer(&bgra, i as i64 * (10_000_000 / fps as i64))
-                .expect("no se ha podido enviar el fotograma");
-            encoder
-                .send_audio_buffer(&por_fotograma, 0)
-                .expect("no se ha podido enviar el sonido");
-        }
-        encoder.finish().expect("no se ha podido cerrar el MP4");
-
-        let bytes = std::fs::read(&destino).expect("no se ha escrito el MP4");
-        let _ = std::fs::remove_file(&destino);
-        println!("MP4 de un segundo con sonido: {} bytes", bytes.len());
-        let tiene_pista = bytes.windows(4).any(|v| v == b"mp4a");
-        assert!(tiene_pista, "el MP4 ha salido sin pista de sonido");
-        assert!(bytes.len() > 5_000, "el MP4 ha salido demasiado pequeÃ±o");
+        .unwrap();
+        let started = audio.started;
+        let format = AudioFormat {
+            channels: audio.formato.canales,
+            sample_rate: audio.formato.muestras_por_segundo,
+        };
+        let mut options = crate::settings::EncodingSettings::default();
+        options.preset = "ultrafast".into();
+        let encoder = Encoder::start(paths.clone(), &options, 1280, 720, 30, Some(format)).unwrap();
+        let (tx, rx) = std::sync::mpsc::sync_channel(2);
+        tx.send(CapturedFrame {
+            bgra: vec![80; 1280 * 720 * 4],
+            ts_ms: 0,
+        })
+        .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let paused_ms = Arc::new(AtomicU64::new(0));
+        let finish_ms = Arc::new(AtomicU64::new(0));
+        let timing = WriterTiming {
+            started,
+            fps: 30,
+            stop: stop.clone(),
+            pause: pause.clone(),
+            paused_ms: paused_ms.clone(),
+            finish_ms: finish_ms.clone(),
+            discard: Arc::new(AtomicBool::new(false)),
+            frames: Arc::new(AtomicU64::new(0)),
+            bytes: Arc::new(AtomicU64::new(0)),
+        };
+        let writer = std::thread::spawn(move || {
+            write_recording(encoder, rx, Some(audio), Reciclados::default(), timing)
+        });
+        std::thread::sleep(Duration::from_millis(1000));
+        pause.store(true, Ordering::Release);
+        let pause_start = Instant::now();
+        std::thread::sleep(Duration::from_millis(400));
+        let pause_duration = pause_start.elapsed().as_millis() as u64;
+        paused_ms.store(pause_duration, Ordering::Release);
+        pause.store(false, Ordering::Release);
+        std::thread::sleep(Duration::from_millis(1000));
+        let active_ms = started.elapsed().as_millis() as u64 - pause_duration;
+        finish_ms.store(active_ms, Ordering::Release);
+        stop.store(true, Ordering::Release);
+        let path = writer.join().unwrap().unwrap().unwrap();
+        drop(tx);
+        let decoded = crate::encode::ffmpeg::command(&options.ffmpeg_path)
+            .args(["-hide_banner", "-i"])
+            .arg(&path)
+            .args([
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0",
+                "-progress",
+                "pipe:1",
+                "-f",
+                "null",
+                "-",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            decoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&decoded.stderr)
+        );
+        let progress = String::from_utf8_lossy(&decoded.stdout);
+        let count: u64 = progress
+            .lines()
+            .filter_map(|l| l.strip_prefix("frame="))
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let expected = active_ms * 30 / 1000;
+        assert!(
+            (expected..=expected + 2).contains(&count),
+            "{active_ms}ms, {count} frames"
+        );
+        assert!(String::from_utf8_lossy(&decoded.stderr).contains("Audio: aac"));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        println!("720p with real WASAPI audio: {active_ms}ms active, {count} frames, pause excluded, no spool");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -8,7 +8,7 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::capture::{Freeze, Rect};
 use crate::error::Result;
-use crate::record::SessionData;
+
 use crate::settings::Settings;
 use crate::windows_mgr::OverlayIntent;
 use tauri_plugin_global_shortcut::Shortcut;
@@ -27,7 +27,8 @@ pub struct Cabecera {
 
 /// Todo lo que hay que compartir con el hilo de captura mientras se graba.
 pub struct RecordingState {
-    pub settings: Settings,
+    pub output: PathBuf,
+    pub play_sound: bool,
     pub started: Instant,
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
@@ -48,7 +49,7 @@ pub struct RecordingState {
     /// El marco que se ve alrededor de lo que se graba. Se cierra solo al soltarlo.
     #[cfg(windows)]
     pub marco: Option<crate::platform::marco::Marco>,
-    pub writer: Option<JoinHandle<Result<SessionData>>>,
+    pub writer: Option<JoinHandle<Result<Option<PathBuf>>>>,
 }
 
 impl RecordingState {
@@ -140,10 +141,6 @@ impl AppState {
             temp_root,
             capturando: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    pub fn session_dir(&self, id: &str) -> PathBuf {
-        self.temp_root.join("sessions").join(id)
     }
 
     pub fn is_recording(&self) -> bool {

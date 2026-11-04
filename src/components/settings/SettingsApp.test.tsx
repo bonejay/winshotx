@@ -52,7 +52,7 @@ describe("focused settings", () => {
   });
   it("persists quality and encoding preferences while disabling old background settings", async () => {
     await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
-    fireEvent.change(screen.getByLabelText("Encoding engine"), { target: { value: "ffmpeg" } });
+
     fireEvent.change(screen.getByLabelText("Video encoder"), { target: { value: "hevc_nvenc" } });
     fireEvent.change(screen.getByLabelText("GPU device index"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("CRF / CQ quality slider"), { target: { value: "18" } });
@@ -62,7 +62,7 @@ describe("focused settings", () => {
   });
   it("rejects malformed advanced arguments without persisting them", async () => {
     await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
-    fireEvent.change(screen.getByLabelText("Encoding engine"), { target: { value: "ffmpeg" } });
+
     fireEvent.blur(screen.getByLabelText("Advanced FFmpeg arguments"), { target: { value: "-g 120" } });
     expect(screen.getByRole("alert")).toHaveTextContent("JSON array");
     fireEvent.blur(screen.getByLabelText("Advanced FFmpeg arguments"), { target: { value: '["-g", "120"]' } });
@@ -76,7 +76,7 @@ describe("focused settings", () => {
   it("saves a custom FFmpeg executable, explicit CRF, and a 120 fps target", async () => {
     await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
     fireEvent.change(screen.getByLabelText("Frame rate"), { target: { value: "120" } });
-    fireEvent.change(screen.getByLabelText("Encoding engine"), { target: { value: "ffmpeg" } });
+
     fireEvent.change(screen.getByLabelText("CRF / CQ quality"), { target: { value: "18" } });
     const path = "C:\\Program Files (x86)\\SVP 4\\utils\\ffmpeg.exe";
     fireEvent.blur(screen.getByLabelText("FFmpeg executable"), { target: { value: path } });
@@ -87,7 +87,7 @@ describe("focused settings", () => {
 
 it("tests only on request and invalidates the result after quality changes", async () => {
   await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
-  fireEvent.change(screen.getByLabelText("Encoding engine"), { target: { value: "ffmpeg" } });
+
   expect(screen.queryByLabelText("Video quality")).toBeNull();
   expect(screen.queryByText("Open editor after recording")).toBeNull();
   await waitFor(() => expect(screen.getByRole("button", { name: "Test encoder" })).toBeEnabled());
@@ -103,7 +103,7 @@ it("tests only on request and invalidates the result after quality changes", asy
 it("shows encoder failures with the exact reason", async () => {
   vi.mocked(ipc.testEncoder).mockRejectedValueOnce("No NVENC capable devices found");
   await open(); fireEvent.click(screen.getByRole("button", { name: "Recording" }));
-  fireEvent.change(screen.getByLabelText("Encoding engine"), { target: { value: "ffmpeg" } });
+
   await waitFor(() => expect(screen.getByRole("button", { name: "Test encoder" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Test encoder" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("No NVENC capable devices found");
