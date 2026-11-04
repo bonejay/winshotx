@@ -12,3 +12,6 @@ src-tauri/gen/
 artifacts/
 artifacts-*.txt
 artifacts-*.json
+
+# Recordings saved into the repo by older builds
+*.mp4
