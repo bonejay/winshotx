@@ -1,0 +1,59 @@
+[package]
+name = "snapframe"
+version = "0.5.0"
+description = "Screenshots and screen recording for Windows"
+authors = ["bonejay"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.92"
+publish = false
+
+[dependencies]
+raw-window-handle = "0.6"
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "software-renderer-systemfonts", "raw-window-handle-06", "unstable-winit-030", "accessibility"] }
+global-hotkey = "0.9"
+resvg = { version = "0.49", default-features = false }
+tray-icon = "0.26"
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+parking_lot = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "ico"] }
+xcap = "0.9"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-capture = "2"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Graphics_Dwm", "Win32_Globalization", "Win32_Media_Audio", "Win32_Devices_FunctionDiscovery", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Com", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_Storage_Xps", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Foundation_Collections", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_HiDpi", "Graphics_Capture", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D11", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture", "Win32_Security", "Win32_System_JobObjects", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
+clipboard-win = "5"
+
+[dev-dependencies]
+i-slint-backend-testing = "1.18"
+
+[build-dependencies]
+slint-build = "1.18"
+winresource = "0.1"
+
+# Day-to-day builds: line tables only (readable backtraces, much less to write and link) and
+# no debug info for dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Fast optimised build for testing: thin LTO in parallel.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
+
+# The shipped build: whole-program LTO, slower to build, smallest and fastest binary.
+[profile.dist]
+inherits = "release"
+lto = true
+codegen-units = 1

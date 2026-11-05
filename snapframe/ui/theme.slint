@@ -1,0 +1,47 @@
+// Colour and type tokens. Settings follow the chosen theme; the overlay, recording bar and
+// popups are always dark because they float over arbitrary screen content.
+
+export global Theme {
+    in-out property <bool> dark: true;
+
+    out property <color> accent: dark ? #0a9bff : #0a76c9;
+    out property <color> accent-hover: dark ? #3aadff : #0866b0;
+    out property <color> canvas: dark ? #161618 : #f6f6f7;
+    out property <color> panel: dark ? #1c1c1f : #ffffff;
+    out property <color> card: dark ? #ffffff08 : #ffffff;
+    out property <color> well: dark ? #00000066 : #0000000a;
+    out property <color> line-faint: dark ? #ffffff0f : #0000000f;
+    out property <color> line: dark ? #ffffff14 : #0000001a;
+    out property <color> line-strong: dark ? #ffffff1f : #00000024;
+    out property <color> line-live: dark ? #ffffff40 : #00000047;
+    out property <color> hover: dark ? #ffffff1a : #0000000f;
+    out property <color> title: dark ? #f5f5f5 : #18181b;
+    out property <color> text: dark ? #e5e5e5 : #27272a;
+    out property <color> soft: dark ? #d4d4d4 : #3f3f46;
+    out property <color> muted: dark ? #a3a3a3 : #6b6b74;
+    out property <color> faint: dark ? #737373 : #8a8a93;
+    out property <color> ok: dark ? #75bb94 : #2e7d4f;
+    out property <color> error: dark ? #ef9a9a : #c62828;
+    out property <color> error-bg: dark ? #d6333314 : #c628280f;
+    out property <color> switch-off: dark ? #ffffff26 : #00000026;
+    out property <color> popup: dark ? #242428 : #ffffff;
+
+    out property <string> font: "Segoe UI Variable Text";
+    out property <string> mono: "Cascadia Mono";
+}
+
+// Fixed dark palette for everything drawn over the screen.
+export global Float {
+    out property <color> bg: #171717eb;
+    out property <color> bg-solid: #161618;
+    out property <color> border: #ffffff1a;
+    out property <color> hover: #ffffff1a;
+    out property <color> active: #ffffff26;
+    out property <color> text: #e5e5e5;
+    out property <color> muted: #a3a3a3;
+    out property <color> faint: #737373;
+    out property <color> blue: #3b82f6;
+    out property <color> red: #ef4444;
+    out property <color> amber: #fbbf24;
+    out property <color> green: #34d399;
+}

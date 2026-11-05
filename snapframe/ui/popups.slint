@@ -1,0 +1,274 @@
+// Small floating windows: the recording toolbar, the "Recording saved" popup and the
+// capture-delay countdown. Always dark.
+
+import { Float } from "theme.slint";
+import { Icons } from "icons.slint";
+import { Icon } from "widgets.slint";
+
+// Tiny vertical peak meter on a −60…0 dB scale, so quiet sound still shows.
+component LevelMeter inherits Rectangle {
+    in property <float> level;
+    property <float> db: level > 0.001 ? 20 * log(level, 10) : -60;
+    property <float> fill: max(0, min(1, (db + 60) / 60));
+    width: 5px;
+    height: 14px;
+    border-radius: 2px;
+    background: #ffffff1a;
+    clip: true;
+    Rectangle {
+        y: parent.height - self.height;
+        height: parent.height * root.fill;
+        border-radius: 2px;
+        background: root.db > -1 ? Float.red : root.db > -9 ? Float.amber : Float.green;
+        animate height { duration: 150ms; easing: ease-out; }
+    }
+}
+
+export component RecorderBar inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    title: "Snapframe recording";
+    background: Float.bg-solid;
+    width: 540px;
+    height: 56px;
+    forward-focus: keys;
+
+    in property <string> elapsed: "0:00";
+    in property <bool> saving;
+    in property <bool> audio;
+    in property <bool> microphone;
+    in property <float> audio-level;
+    in property <float> microphone-level;
+    in property <string> size;
+    in property <string> fps;
+    // "GPU" or "CPU"; `detail` names the chosen encoder for a few seconds after the start.
+    in property <string> engine: "CPU";
+    in property <string> detail;
+    // Encoding is not keeping up with the target frame rate.
+    in property <bool> behind;
+    in property <bool> armed;
+
+    callback stop();
+    callback discard();
+    callback drag();
+
+    TouchArea {
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.drag(); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 10px;
+        spacing: 10px;
+        alignment: stretch;
+
+        // Recording dot or spinner, and the timer.
+        HorizontalLayout {
+            spacing: 9px;
+            if !root.saving: Rectangle {
+                width: 10px;
+                height: 10px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 5px;
+                background: Float.red;
+                property <bool> on: true;
+                opacity: self.on ? 1 : 0.35;
+                animate opacity { duration: 700ms; easing: ease-in-out; }
+                Timer {
+                    interval: 700ms;
+                    running: !root.saving;
+                    triggered => { parent.on = !parent.on; }
+                }
+            }
+            if root.saving: Icon { source: Icons.loader-circle; width: 15px; height: 15px; y: (parent.height - self.height) / 2; tint: Float.muted; }
+            Text {
+                text: root.elapsed;
+                color: root.saving ? Float.muted : white;
+                font-size: 16px;
+                font-weight: 600;
+                font-family: "Cascadia Mono";
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Time recorded";
+            }
+        }
+
+        if root.saving: Text { text: "Saving…"; color: Float.muted; font-size: 13px; vertical-alignment: center; }
+        if !root.saving: HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 20px;
+                width: mp4.preferred-width + 12px;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #ffffff1a;
+                accessible-role: text;
+                accessible-label: root.engine == "GPU" ? "Encoding on the graphics card" : "Encoding on the processor";
+                mp4 := Text { text: root.engine; color: #d4d4d4; font-size: 12px; font-weight: 600; }
+            }
+            if root.audio: HorizontalLayout {
+                spacing: 4px;
+                accessible-role: text;
+                accessible-label: "System sound being recorded";
+                Icon { source: Icons.volume-2; width: 15px; height: 15px; y: (parent.height - self.height) / 2; tint: Float.muted; }
+                LevelMeter { level: root.audio-level; y: (parent.height - self.height) / 2; }
+            }
+            if root.microphone: HorizontalLayout {
+                spacing: 4px;
+                accessible-role: text;
+                accessible-label: "Microphone being recorded";
+                Icon { source: Icons.mic; width: 15px; height: 15px; y: (parent.height - self.height) / 2; tint: Float.muted; }
+                LevelMeter { level: root.microphone-level; y: (parent.height - self.height) / 2; }
+            }
+            if root.detail != "": Text { text: root.detail; color: Float.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
+            if root.detail == "" && root.size != "": Text { text: root.size; color: Float.muted; font-size: 13px; vertical-alignment: center; }
+            if root.detail == "" && root.fps != "": Text {
+                text: root.fps;
+                color: root.behind ? Float.amber : Float.muted;
+                font-size: 13px;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: root.behind ? "Encoding is falling behind: " + root.fps : root.fps;
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // Stop.
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 36px;
+            width: armed ? 36px : stop-row.preferred-width;
+            border-radius: 9px;
+            background: stop-touch.has-hover ? #60a5fa : Float.blue;
+            opacity: root.saving ? 0.4 : 1;
+            accessible-role: button;
+            accessible-label: "Stop";
+            accessible-action-default => { root.stop(); }
+            stop-row := HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 12px;
+                spacing: 6px;
+                Icon { source: Icons.square; width: 16px; height: 16px; y: (parent.height - self.height) / 2; tint: white; }
+                if !root.armed: Text { text: "Stop"; color: white; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+            }
+            stop-touch := TouchArea {
+                enabled: !root.saving;
+                mouse-cursor: pointer;
+                clicked => { root.stop(); }
+            }
+        }
+
+        // Discard: two clicks (or two Escapes) within four seconds.
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 36px;
+            width: discard-row.preferred-width;
+            border-radius: 9px;
+            background: root.armed ? (discard-touch.has-hover ? #f87171 : Float.red) : (discard-touch.has-hover ? #ef444426 : transparent);
+            opacity: root.saving ? 0.4 : 1;
+            accessible-role: button;
+            accessible-label: root.armed ? "Discard?" : "Discard";
+            accessible-action-default => { root.discard(); }
+            discard-row := HorizontalLayout {
+                padding-left: 10px;
+                padding-right: root.armed ? 12px : 10px;
+                spacing: 6px;
+                Icon { source: Icons.trash-2; width: 18px; height: 18px; y: (parent.height - self.height) / 2; tint: root.armed ? white : #f87171; }
+                if root.armed: Text { text: "Discard?"; color: white; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+            }
+            discard-touch := TouchArea {
+                enabled: !root.saving;
+                mouse-cursor: pointer;
+                clicked => { root.discard(); }
+            }
+        }
+    }
+
+    keys := FocusScope {
+        width: 0;
+        height: 0;
+        key-pressed(event) => {
+            if event.text == Key.Escape { root.discard(); return accept; }
+            reject
+        }
+    }
+}
+
+export component SavedPopup inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    title: "Recording saved";
+    background: Float.bg-solid;
+    width: 380px;
+    height: 84px;
+
+    in property <string> name;
+    in property <string> error;
+    out property <bool> hovered: touch.has-hover;
+    callback play();
+    callback reveal();
+    callback dismiss();
+
+    Rectangle { background: touch.has-hover ? #1e1e21 : transparent; animate background { duration: 120ms; } }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.play(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        spacing: 12px;
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 20px;
+            background: Float.blue;
+            Icon { source: Icons.play; width: 20px; height: 20px; x: 11px; tint: white; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: "Recording saved"; color: white; font-size: 14px; font-weight: 600; }
+            Text {
+                text: root.error != "" ? root.error : root.name + " · click to play";
+                color: root.error != "" ? #fca5a5 : Float.muted;
+                font-size: 12px;
+                overflow: elide;
+            }
+        }
+        for b[i] in [{ icon: Icons.folder-open, label: "Show in folder" }, { icon: Icons.x, label: "Close" }]: Rectangle {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 7px;
+            background: bt.has-hover ? #ffffff1a : transparent;
+            accessible-role: button;
+            accessible-label: b.label;
+            Icon { source: b.icon; width: 16px; height: 16px; tint: bt.has-hover ? white : Float.muted; }
+            bt := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if i == 0 { root.reveal(); } else { root.dismiss(); }
+                }
+            }
+        }
+    }
+}
+
+export component Countdown inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    title: "Snapframe countdown";
+    background: Float.bg-solid;
+    width: 132px;
+    height: 132px;
+    in property <int> seconds;
+    if root.seconds > 0: Text { text: root.seconds; color: white; font-size: 60px; font-weight: 300; }
+    if root.seconds <= 0: Icon { source: Icons.camera; width: 48px; height: 48px; tint: Float.muted; }
+}

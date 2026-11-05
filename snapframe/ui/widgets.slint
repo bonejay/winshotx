@@ -1,0 +1,397 @@
+// Shared building blocks. Settings widgets use Theme (light or dark); Float* widgets are for
+// the overlay, recording bar and popups, which are always dark.
+
+import { Theme, Float } from "theme.slint";
+import { Icons } from "icons.slint";
+
+export component Icon inherits Image {
+    in property <color> tint: Theme.text;
+    colorize: tint;
+    width: 18px;
+    height: 18px;
+    image-fit: contain;
+}
+
+// Round icon button on the dark floating bars.
+export component FloatButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> danger;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    background: !enabled ? transparent
+        : active ? Float.active
+        : touch.has-hover ? (danger ? #ef444433 : Float.hover) : transparent;
+    opacity: enabled ? 1 : 0.4;
+    accessible-role: button;
+    accessible-label: label;
+    accessible-checked: active;
+    accessible-action-default => { clicked(); }
+    animate background { duration: 120ms; }
+    Icon {
+        source: icon;
+        width: 19px;
+        height: 19px;
+        tint: danger && touch.has-hover ? #fca5a5 : active ? white : #d4d4d4;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Kbd inherits Rectangle {
+    in property <string> text;
+    in property <bool> float: true;
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: float ? #ffffff26 : Theme.line-strong;
+    background: float ? #ffffff1a : Theme.hover;
+    height: label.preferred-height + 6px;
+    width: max(label.preferred-width + 10px, self.height);
+    label := Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: 600;
+        color: float ? #f5f5f5 : Theme.text;
+        horizontal-alignment: center;
+    }
+}
+
+// Dark rounded chip used for floating hints and notices.
+export component Chip inherits Rectangle {
+    in property <color> fill: Float.bg;
+    background: fill;
+    border-radius: 999px;
+    border-width: 1px;
+    border-color: Float.border;
+    drop-shadow-blur: 14px;
+    drop-shadow-color: #00000080;
+    drop-shadow-offset-y: 4px;
+}
+
+// ---------------------------------------------------------------- settings widgets
+
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <bool> pressed-look: false;
+    callback clicked;
+    height: 32px;
+    min-width: content.preferred-width + 24px;
+    border-radius: 6px;
+    border-width: primary ? 0px : 1px;
+    border-color: Theme.line-strong;
+    background: primary ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : (touch.has-hover || pressed-look) ? Theme.hover : Theme.well;
+    opacity: enabled ? 1 : 0.5;
+    accessible-role: button;
+    accessible-label: text;
+    accessible-enabled: enabled;
+    accessible-action-default => { clicked(); }
+    animate background { duration: 100ms; }
+    content := HorizontalLayout {
+        alignment: center;
+        spacing: 7px;
+        padding-left: 12px;
+        padding-right: 12px;
+        if has-icon: Icon {
+            source: icon;
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            tint: primary ? white : Theme.text;
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 13.5px;
+            font-weight: primary ? 600 : 400;
+            color: primary ? white : Theme.text;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Switch inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: checked ? Theme.accent : Theme.switch-off;
+    opacity: enabled ? 1 : 0.5;
+    accessible-role: switch;
+    accessible-label: label;
+    accessible-checked: checked;
+    accessible-checkable: true;
+    accessible-action-default => { touch.clicked(); }
+    animate background { duration: 140ms; }
+    knob := Rectangle {
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        y: 3px;
+        x: root.checked ? root.width - self.width - 3px : 3px;
+        background: white;
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #0000004d;
+        animate x { duration: 140ms; easing: ease-out; }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+// Single-line text field. `edited` fires on every change, `accepted` on Enter or focus loss.
+export component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <string> label;
+    in property <bool> mono: false;
+    callback edited(string);
+    callback accepted(string);
+    height: 32px;
+    preferred-width: 200px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line-strong;
+    background: Theme.well;
+    clip: true;
+    accessible-role: text-input;
+    accessible-label: label;
+    accessible-value: text;
+    accessible-action-set-value(v) => { self.text = v; self.edited(v); self.accepted(v); }
+    if root.text == "" && !input.has-focus: Text {
+        x: 10px;
+        text: root.placeholder;
+        color: Theme.faint;
+        font-size: 13.5px;
+        vertical-alignment: center;
+        height: parent.height;
+    }
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text <=> root.text;
+        color: Theme.text;
+        font-size: 13.5px;
+        font-family: mono ? Theme.mono : Theme.font;
+        vertical-alignment: center;
+        single-line: true;
+        selection-background-color: Theme.accent;
+        edited => { root.edited(self.text); }
+        accepted => { root.accepted(self.text); }
+        changed has-focus => { if !self.has-focus { root.accepted(self.text); } }
+    }
+}
+
+// Drop-down list.
+export component Select inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current: 0;
+    in property <string> label;
+    in property <bool> enabled: true;
+    // Options that cannot be chosen (shown dimmed), by index.
+    in property <[bool]> disabled;
+    in property <bool> float: false;
+    callback selected(int);
+    height: float ? 32px : 32px;
+    preferred-width: 160px;
+    border-radius: float ? 9px : 6px;
+    border-width: 1px;
+    border-color: float ? Float.border : (touch.has-hover ? Theme.line-live : Theme.line-strong);
+    background: float ? #262626 : Theme.well;
+    opacity: enabled ? 1 : 0.5;
+    accessible-role: combobox;
+    accessible-label: label;
+    accessible-value: current >= 0 && current < options.length ? options[current] : "";
+    accessible-action-default => { popup.show(); }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 6px;
+        Text {
+            text: current >= 0 && current < options.length ? options[current] : "";
+            color: float ? #f5f5f5 : Theme.text;
+            font-size: float ? 12.5px : 13.5px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        Icon {
+            source: Icons.chevron-down;
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            tint: float ? Float.muted : Theme.muted;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { popup.show(); }
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 220px);
+        Rectangle {
+            background: float ? #1f1f22 : Theme.popup;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: float ? Float.border : Theme.line-strong;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000059;
+            drop-shadow-offset-y: 6px;
+            VerticalLayout {
+                padding: 4px;
+                for option[i] in root.options: Rectangle {
+                    height: 30px;
+                    border-radius: 5px;
+                    property <bool> off: i < root.disabled.length && root.disabled[i];
+                    background: item.has-hover && !off ? (float ? #ffffff14 : Theme.hover) : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        Icon {
+                            source: Icons.check;
+                            width: 14px;
+                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            opacity: i == root.current ? 1 : 0;
+                            tint: float ? Float.text : Theme.accent;
+                        }
+                        Text {
+                            text: option;
+                            vertical-alignment: center;
+                            font-size: float ? 12.5px : 13.5px;
+                            color: off ? (float ? Float.faint : Theme.faint) : (float ? Float.text : Theme.text);
+                            overflow: elide;
+                        }
+                    }
+                    item := TouchArea {
+                        enabled: !off;
+                        clicked => { root.selected(i); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    background: Theme.card;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.line;
+    VerticalLayout {
+        Rectangle {
+            VerticalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 14px;
+                padding-bottom: 12px;
+                spacing: 2px;
+                Text { text: root.title; font-size: 15px; font-weight: 600; color: Theme.title; }
+                if root.detail != "": Text { text: root.detail; font-size: 13px; color: Theme.muted; wrap: word-wrap; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        @children
+    }
+}
+
+// One settings row: label (+ hint) on the left, control on the right.
+export component Row inherits Rectangle {
+    in property <string> label;
+    in property <string> hint;
+    in property <bool> last: false;
+    min-height: 52px;
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 9px;
+        padding-bottom: 9px;
+        spacing: 18px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text { text: root.label; font-size: 14px; color: Theme.text; wrap: word-wrap; }
+            if root.hint != "": Text { text: root.hint; font-size: 12px; color: Theme.muted; wrap: word-wrap; }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            horizontal-stretch: 0;
+            @children
+        }
+    }
+    if !last: Rectangle { y: parent.height - 1px; x: 0; height: 1px; background: Theme.line-faint; }
+}
+
+// A paragraph of explanatory or status text inside a card.
+export component Note inherits Rectangle {
+    in property <string> text;
+    in property <bool> error: false;
+    in property <bool> ok: false;
+    in property <bool> mono: false;
+    background: error ? Theme.error-bg : transparent;
+    border-radius: 6px;
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        Text {
+            text: root.text;
+            wrap: word-wrap;
+            font-size: 13px;
+            font-family: root.mono ? Theme.mono : Theme.font;
+            color: root.error ? Theme.error : root.ok ? Theme.ok : Theme.muted;
+        }
+    }
+}
+
+// Horizontal level meter (−60…0 dBFS).
+export component Meter inherits Rectangle {
+    in property <float> db: -60;
+    in property <bool> clipping;
+    width: 160px;
+    height: 8px;
+    border-radius: 3px;
+    background: Theme.well;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: parent.width * max(0, min(1, (root.db + 60) / 60));
+        background: root.clipping ? #e66d64 : #5ab881;
+        animate width { duration: 80ms; }
+    }
+}

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1fa2ff"/>
+      <stop offset="1" stop-color="#6a4cff"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg)"/>
+  <!-- Viewfinder corners: the selection. -->
+  <g fill="none" stroke="#fff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M60 106 V82 a22 22 0 0 1 22 -22 H106"/>
+    <path d="M150 60 H174 a22 22 0 0 1 22 22 V106"/>
+    <path d="M196 150 V174 a22 22 0 0 1 -22 22 H150"/>
+    <path d="M106 196 H82 a22 22 0 0 1 -22 -22 V150"/>
+  </g>
+  <!-- Shutter / record. -->
+  <circle cx="128" cy="128" r="30" fill="#fff"/>
+  <circle cx="128" cy="128" r="15" fill="#ff4d6a"/>
+</svg>

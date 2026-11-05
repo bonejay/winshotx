@@ -1,17 +1,15 @@
-node_modules/
-dist/
 .env
 .env.*
-
-# Rust / Tauri
-src-tauri/target/
-src-tauri/gen/
 
 # Local tools and build output
 .tools/
 artifacts/
+release/
 artifacts-*.txt
 artifacts-*.json
 
 # Recordings saved into the repo by older builds
 *.mp4
+
+# Slint app build output
+snapframe/target/

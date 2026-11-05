@@ -1,0 +1,5 @@
+Bindings: nvidia-video-codec-sdk 0.4.0, Copyright 2023 Viliam Vadocz (MIT).
+https://github.com/ViliamVadocz/nvidia-video-codec-sdk
+Underlying nvEncodeAPI.h: Copyright (c) 2010-2023 NVIDIA Corporation (MIT).
+The permission and warranty terms in LICENSE apply to both notices.
+Adaptations: module paths and Rustfmt formatting. The driver is loaded at runtime from System32.

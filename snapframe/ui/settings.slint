@@ -1,0 +1,470 @@
+// Settings window. Every control writes into `data` and calls `changed()`; Rust validates,
+// saves and writes the result back. Lists and status texts come from Rust.
+
+import { Slider, Palette, TextEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { Icon, Button, Switch, Field, Select, Card, Row, Note, Meter, Kbd } from "widgets.slint";
+
+export struct SettingsData {
+    capture-shortcut: string,
+    record-shortcut: string,
+    save-screenshots: bool,
+    delay-index: int,
+    capture-cursor: bool,
+    show-magnifier: bool,
+    record-audio: bool,
+    record-microphone: bool,
+    system-device-index: int,
+    microphone-device-index: int,
+    ffmpeg-path: string,
+    save-directory: string,
+    video-directory: string,
+    theme: int,
+    start-with-windows: bool,
+    play-sound: bool,
+}
+
+export struct AudioMeter {
+    db: float,
+    clipping: bool,
+    // Shown instead of (or next to) the bar: "Not enabled", "Connecting…", "−12.3 dBFS"…
+    caption: string,
+    value: string,
+    show-bar: bool,
+    error: bool,
+}
+
+component ShortcutBox inherits Rectangle {
+    in property <string> value;
+    in property <bool> listening;
+    in property <bool> active: true;
+    callback clicked;
+    height: 32px;
+    width: max(150px, row.preferred-width + 16px);
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: listening ? Theme.accent : active ? (touch.has-hover ? Theme.line-live : Theme.line-strong) : #ef444466;
+    background: listening ? #0a9bff1a : active ? Theme.well : #ef44441a;
+    accessible-role: button;
+    accessible-label: listening ? "Press the keys" : "Shortcut " + value;
+    accessible-action-default => { clicked(); }
+    if listening: Text { text: "Press the keys…  (Esc cancels)"; color: Theme.accent; font-size: 13px; }
+    row := HorizontalLayout {
+        visible: !root.listening;
+        alignment: end;
+        padding-right: 8px;
+        padding-left: 8px;
+        spacing: 4px;
+        for part in root.value-parts: Kbd { text: part; float: false; y: (parent.height - self.height) / 2; }
+    }
+    in property <[string]> value-parts;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Tab inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> current;
+    callback clicked;
+    width: row.preferred-width;
+    background: touch.has-hover && !current ? Theme.hover : transparent;
+    accessible-role: tab;
+    accessible-label: text;
+    accessible-item-selected: current;
+    accessible-action-default => { clicked(); }
+    row := HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        Icon { source: root.icon; width: 16px; height: 16px; y: (parent.height - self.height) / 2; tint: current ? Theme.title : Theme.muted; }
+        Text { text: root.text; font-size: 14px; color: current ? Theme.title : Theme.muted; vertical-alignment: center; }
+    }
+    Rectangle { y: parent.height - 2px; height: 2px; background: current ? Theme.accent : transparent; }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component AudioRow inherits Row {
+    in property <bool> enabled;
+    in property <[string]> devices;
+    in property <int> device-index;
+    in property <AudioMeter> meter;
+    callback toggled(bool);
+    callback device(int);
+    if root.meter.show-bar: Meter { width: 90px; db: root.meter.db; clipping: root.meter.clipping; y: (parent.height - self.height) / 2; }
+    if root.meter.show-bar || root.meter.error: Text {
+        text: root.meter.error ? root.meter.caption : root.meter.value;
+        color: root.meter.error ? Theme.error : Theme.muted;
+        font-size: 12px;
+        vertical-alignment: center;
+        min-width: 70px;
+        max-width: 220px;
+        wrap: word-wrap;
+    }
+    Select { width: 240px; enabled: root.enabled; label: root.label + " device"; options: root.devices; current: root.device-index; selected(i) => { root.device(i); } }
+    Switch { label: "Record " + root.label; checked: root.enabled; y: (parent.height - self.height) / 2; toggled(v) => { root.toggled(v); } }
+}
+
+// A folder or file location shown in full, with its buttons beside it.
+component PathRow inherits Rectangle {
+    in property <string> label;
+    in property <string> path;
+    VerticalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 6px;
+        Text { text: root.label; font-size: 14px; color: Theme.text; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 36px;
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: Theme.line-strong;
+                background: Theme.well;
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: root.path;
+                    font-size: 14px;
+                    color: Theme.title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            @children
+        }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line-faint; }
+}
+
+export component SettingsWindow inherits Window {
+    title: "Snapframe";
+    icon: @image-url("../assets/icon.png");
+    background: Theme.canvas;
+    min-width: 640px;
+    // Wider adds nothing: the content column is at most 860 px.
+    max-width: 1000px;
+    min-height: 480px;
+    preferred-width: 960px;
+    preferred-height: 840px;
+    default-font-family: Theme.font;
+    default-font-size: 14px;
+
+    in-out property <SettingsData> data;
+    in-out property <int> tab: 0;
+    in property <bool> saved;
+    in property <string> error;
+    // Which shortcut field is listening: 0 none, 1 screenshot, 2 recording.
+    in property <int> listening;
+    in property <bool> capture-active: true;
+    in property <bool> record-active: true;
+    in property <[string]> capture-parts;
+    in property <[string]> record-parts;
+    // Audio.
+    in property <[string]> system-devices;
+    in property <[string]> microphone-devices;
+    in property <string> system-hint;
+    in property <string> microphone-hint;
+    in property <bool> checking;
+    in property <AudioMeter> system-meter;
+    in property <AudioMeter> microphone-meter;
+    in property <string> audio-error;
+    in property <string> ffmpeg-status;
+    in property <bool> ffmpeg-ok;
+    in property <bool> testing;
+    in-out property <int> test-size-index: 0;
+    in property <string> test-result;
+    in property <bool> test-ok;
+    in property <string> audio-summary;
+
+    callback changed();
+    callback listen-shortcut(int);
+    callback toggle-check();
+    callback refresh-devices();
+    callback test-encoder();
+    callback test-size-changed();
+    callback pick-folder(int);
+    callback open-folder(int);
+    callback take-screenshot();
+    callback start-recording();
+    callback tab-changed(int);
+
+    VerticalLayout {
+        // Top bar: brand, tabs, save status.
+        Rectangle {
+            height: 52px;
+            background: Theme.panel;
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                spacing: 20px;
+                // The app name, set apart from the tabs by a divider so it does not read as one.
+                HorizontalLayout {
+                    spacing: 20px;
+                    Text { text: "Snapframe"; font-size: 16px; font-weight: 700; color: Theme.title; vertical-alignment: center; }
+                    Rectangle { width: 1px; height: 22px; y: (parent.height - self.height) / 2; background: Theme.line-strong; }
+                }
+                HorizontalLayout {
+                    spacing: 4px;
+                    Tab { text: "Screenshots"; icon: Icons.camera; current: root.tab == 0; clicked => { root.tab = 0; root.tab-changed(0); } }
+                    Tab { text: "Recording"; icon: Icons.video; current: root.tab == 1; clicked => { root.tab = 1; root.tab-changed(1); } }
+                    Tab { text: "Preferences"; icon: Icons.sliders-horizontal; current: root.tab == 2; clicked => { root.tab = 2; root.tab-changed(2); } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if root.saved: HorizontalLayout {
+                    spacing: 6px;
+                    Icon { source: Icons.check; width: 14px; height: 14px; y: (parent.height - self.height) / 2; tint: Theme.ok; }
+                    Text { text: "Saved"; color: Theme.ok; font-size: 13px; vertical-alignment: center; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+
+        // Own scroll area: Slint's ScrollView moves only 60 px per wheel notch without
+        // smoothing, which felt slow.
+        viewport := Rectangle {
+            clip: true;
+            vertical-stretch: 1;
+            property <length> target: 0;
+            property <length> max-offset: max(0, page.preferred-height - self.height);
+            property <length> offset: min(self.target, self.max-offset);
+            animate offset { duration: 140ms; easing: ease-out; }
+            function scroll-by(dy: length) {
+                self.target = max(0, min(self.max-offset, self.target + dy));
+            }
+            changed max-offset => { if self.target > self.max-offset { self.target = self.max-offset; } }
+            wheel := TouchArea {
+                scroll-event(e) => {
+                    // One notch is 60 px from winit; scroll ~130 px like a browser.
+                    viewport.scroll-by(-e.delta-y * 2.2);
+                    accept
+                }
+            page := VerticalLayout {
+                y: -viewport.offset;
+                height: self.preferred-height;
+                width: viewport.width;
+                padding-top: 24px;
+                padding-bottom: 32px;
+                padding-left: max(24px, (viewport.width - 860px) / 2);
+                padding-right: max(24px, (viewport.width - 860px) / 2);
+                spacing: 20px;
+
+                Text {
+                    text: root.tab == 0 ? "Shortcuts and capture options." : root.tab == 1 ? "Recording and video encoding options." : "Files, appearance, and startup.";
+                    color: Theme.muted;
+                    font-size: 13px;
+                }
+                if root.error != "": Note { text: root.error; error: true; }
+
+                // ------------------------------------------------ Screenshots
+                if root.tab == 0: VerticalLayout {
+                    spacing: 20px;
+                    Card {
+                        title: "Capture";
+                        detail: "Drag an area, click a window, or click empty desktop (or press Ctrl+A) for the whole screen.";
+                        Row {
+                            label: "Screenshot shortcut";
+                            ShortcutBox { value-parts: root.capture-parts; listening: root.listening == 1; active: root.capture-active; clicked => { root.listen-shortcut(1); } }
+                        }
+                        Row {
+                            label: "Also save screenshots to the screenshot folder";
+                            hint: "Screenshots are always copied to the clipboard.";
+                            Switch { label: "Also save screenshots"; checked: root.data.save-screenshots; toggled(v) => { root.data.save-screenshots = v; root.changed(); } }
+                        }
+                        Row {
+                            label: "Capture delay";
+                            hint: "How long to wait before freezing the screen, so open menus can be captured.";
+                            Select { width: 130px; label: "Capture delay"; options: ["No delay", "2 s delay", "3 s delay", "5 s delay", "10 s delay"]; current: root.data.delay-index; selected(i) => { root.data.delay-index = i; root.changed(); } }
+                        }
+                        Row {
+                            label: "Show";
+                            last: true;
+                            Text { text: "Mouse cursor"; color: Theme.text; font-size: 13.5px; vertical-alignment: center; }
+                            Switch { label: "Include the mouse cursor"; y: (parent.height - self.height) / 2; checked: root.data.capture-cursor; toggled(v) => { root.data.capture-cursor = v; root.changed(); } }
+                            Rectangle { width: 10px; }
+                            Text { text: "Magnifier"; color: Theme.text; font-size: 13.5px; vertical-alignment: center; }
+                            Switch { label: "Show magnifier"; y: (parent.height - self.height) / 2; checked: root.data.show-magnifier; toggled(v) => { root.data.show-magnifier = v; root.changed(); } }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: "Take a screenshot"; primary: true; has-icon: true; icon: Icons.camera; clicked => { root.take-screenshot(); } }
+                    }
+                }
+
+                // ------------------------------------------------ Recording
+                if root.tab == 1: VerticalLayout {
+                    spacing: 20px;
+                    Card {
+                        title: "Recording";
+                        detail: "Frame rate and quality are chosen on the recording toolbar; the encoder is picked automatically for the selected size.";
+                        Row {
+                            label: "Start / stop shortcut";
+                            ShortcutBox { value-parts: root.record-parts; listening: root.listening == 2; active: root.record-active; clicked => { root.listen-shortcut(2); } }
+                        }
+                        AudioRow {
+                            label: "System sound";
+                            hint: root.system-hint;
+                            enabled: root.data.record-audio;
+                            devices: root.system-devices;
+                            device-index: root.data.system-device-index;
+                            meter: root.system-meter;
+                            toggled(v) => { root.data.record-audio = v; root.changed(); }
+                            device(i) => { root.data.system-device-index = i; root.changed(); }
+                        }
+                        AudioRow {
+                            label: "Microphone";
+                            hint: root.microphone-hint;
+                            enabled: root.data.record-microphone;
+                            devices: root.microphone-devices;
+                            device-index: root.data.microphone-device-index;
+                            meter: root.microphone-meter;
+                            toggled(v) => { root.data.record-microphone = v; root.changed(); }
+                            device(i) => { root.data.microphone-device-index = i; root.changed(); }
+                        }
+                        Row {
+                            label: "Audio level check";
+                            hint: "Reads audio briefly to show the levels above; nothing is saved.";
+                            last: true;
+                            Button {
+                                text: root.checking ? "Stop" : "Check levels";
+                                pressed-look: root.checking;
+                                enabled: root.data.record-audio || root.data.record-microphone;
+                                clicked => { root.toggle-check(); }
+                            }
+                        }
+                        if root.audio-error != "": Note { text: root.audio-error; error: true; }
+                    }
+                    Card {
+                        title: "Check encoder";
+                        detail: "Encodes three seconds of generated motion and audio at this size with the toolbar's frame rate and quality, using the encoder that would be picked for it.";
+                        Row {
+                            label: "Test size";
+                            last: true;
+                            Select {
+                                width: 245px;
+                                label: "Encoder test resolution";
+                                options: ["1080p · 1920 × 1080", "1440p · 2560 × 1440", "4K · 3840 × 2160"];
+                                current: root.test-size-index;
+                                enabled: !root.testing;
+                                selected(i) => { root.test-size-index = i; root.test-size-changed(); }
+                            }
+                            Button {
+                                text: root.testing ? "Testing…" : "Test encoder";
+                                enabled: !root.testing && root.ffmpeg-ok;
+                                clicked => { root.test-encoder(); }
+                            }
+                        }
+                        if root.test-result != "": Rectangle {
+                            height: check-message.preferred-height + 24px;
+                            check-message := Text {
+                                x: 18px; y: 10px; width: parent.width - 36px;
+                                text: root.test-result;
+                                color: root.test-ok ? Theme.ok : Theme.error;
+                                font-size: 12.5px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { text: "Select a region to record"; primary: true; has-icon: true; icon: Icons.video; clicked => { root.start-recording(); } }
+                    }
+                }
+
+                // ------------------------------------------------ Preferences
+                if root.tab == 2: Card {
+                    title: "Files & appearance";
+                    PathRow {
+                        label: "Screenshot folder";
+                        path: root.data.save-directory;
+                        Button { text: "Change"; has-icon: true; icon: Icons.folder-open; clicked => { root.pick-folder(0); } }
+                        Button { text: "Open"; clicked => { root.open-folder(0); } }
+                    }
+                    PathRow {
+                        label: "Video folder";
+                        path: root.data.video-directory;
+                        Button { text: "Change"; has-icon: true; icon: Icons.folder-open; clicked => { root.pick-folder(1); } }
+                        Button { text: "Open"; clicked => { root.open-folder(1); } }
+                    }
+                    VerticalLayout {
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 6px;
+                        Text { text: "FFmpeg executable"; font-size: 14px; color: Theme.text; }
+                        Field { height: 36px; label: "FFmpeg executable"; text: root.data.ffmpeg-path; accepted(t) => { if t != root.data.ffmpeg-path { root.data.ffmpeg-path = t; root.changed(); } } }
+                        Text { text: root.ffmpeg-status; font-size: 12px; color: root.ffmpeg-ok ? Theme.muted : Theme.error; wrap: word-wrap; }
+                    }
+                    Rectangle { height: 1px; background: Theme.line-faint; }
+                    Row {
+                        label: "Theme";
+                        Select { width: 200px; label: "Theme"; options: ["Follow Windows", "Dark", "Light"]; current: root.data.theme; selected(i) => { root.data.theme = i; root.changed(); } }
+                    }
+                    Row {
+                        label: "Start with Windows";
+                        Switch { label: "Start with Windows"; checked: root.data.start-with-windows; toggled(v) => { root.data.start-with-windows = v; root.changed(); } }
+                    }
+                    Row {
+                        label: "Play capture sound";
+                        last: true;
+                        Switch { label: "Play capture sound"; checked: root.data.play-sound; toggled(v) => { root.data.play-sound = v; root.changed(); } }
+                    }
+                }
+                Text {
+                    text: "Made with Slint · Icons by Lucide";
+                    color: Theme.faint;
+                    font-size: 11.5px;
+                    horizontal-alignment: center;
+                }
+            }
+            }
+            // Scrollbar, draggable.
+            if viewport.max-offset > 0: Rectangle {
+                x: parent.width - 10px;
+                width: 10px;
+                property <length> thumb: max(40px, parent.height * parent.height / page.preferred-height);
+                thumb-rect := Rectangle {
+                    x: 2px;
+                    width: bar-touch.has-hover || bar-touch.pressed ? 7px : 5px;
+                    height: parent.thumb;
+                    y: viewport.offset / viewport.max-offset * (parent.height - parent.thumb);
+                    border-radius: 3px;
+                    background: bar-touch.pressed ? Theme.line-live : bar-touch.has-hover ? Theme.line-live : Theme.line-strong;
+                    animate width { duration: 100ms; }
+                }
+                bar-touch := TouchArea {
+                    property <length> grab-offset;
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down {
+                            self.grab-offset = viewport.target;
+                        }
+                    }
+                    moved => {
+                        viewport.target = max(0, min(viewport.max-offset,
+                            self.grab-offset + (self.mouse-y - self.pressed-y) * viewport.max-offset / max(1px, parent.height - parent.thumb)));
+                    }
+                }
+            }
+            FocusScope {
+                width: 0;
+                height: 0;
+                key-pressed(e) => {
+                    if e.text == Key.PageDown { viewport.scroll-by(viewport.height * 0.85); return accept; }
+                    if e.text == Key.PageUp { viewport.scroll-by(-viewport.height * 0.85); return accept; }
+                    if e.text == Key.End { viewport.scroll-by(viewport.max-offset); return accept; }
+                    if e.text == Key.Home { viewport.scroll-by(-viewport.max-offset); return accept; }
+                    reject
+                }
+            }
+        }
+    }
+}
